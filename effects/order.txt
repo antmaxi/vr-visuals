@@ -2,4 +2,5 @@
 # so add new effects above peripheral_emphasis to keep it last.
 breathing_drift.glsl
 pseudo_deepdream.glsl
+edge_mandala.glsl
 peripheral_emphasis.glsl

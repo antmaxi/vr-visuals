@@ -1,6 +1,12 @@
-// Edge Mandala: angular, glowing ornament grows out of the edge of every shape.
-// Each edge is a mirror line: bands of lines, triangles, squares and waves are
-// born on the edge and travel outward to both sides, identical on both sides.
+// Edge Mandala: an angular, glowing ornament grows out of the edge of every
+// shape. Each edge is a mirror line: bands of lines, triangles, squares and
+// waves are born on the edge and travel outward, identical on both sides, with
+// a bright light line on the edge itself.
+//
+// The higher eff_int (in auto mode: the longer you hold still), the further the
+// ornament reaches and the more motifs and grid lines appear. At 0 the image is
+// untouched.
+
 // Style inspiration: visionary "aura" art (Alex Grey) - layered colored bands
 // hugging the body outline, fine luminous linework, a sacred-geometry grid.
 //
@@ -40,7 +46,8 @@
 // (aspect-correct for landscape, 4K and vertical 9:16 alike).
 
 // ============================================================================
-// Controls (the harness has no custom uniforms: edit these constants)
+// Controls: edit these constants (or turn one into a panel slider with
+// "@param", see README; it then needs a description too, see AGENTS.md)
 // ============================================================================
 const float edgeThreshold   = 0.06;  // 0..0.5    gradient strength where edges start
 const float edgeSoftness    = 0.10;  // 0.01..0.5 smoothstep width above the threshold
