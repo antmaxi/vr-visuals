@@ -56,11 +56,16 @@ The headset's cameras can only be used on a secure page, so open the **GitHub Pa
 1. Allow camera access: in the Quest Browser's settings/permissions, allow **Headset cameras** (otherwise only the avatar camera is offered).
 2. Tap **Webcam**, allow access, and pick the passthrough camera (e.g. "camera 1 ... facing back") in the dropdown that appears.
 3. Tap **Enter VR**. The processed camera image fills your view. Press the Meta/menu button to leave.
-4. If the image looks too big or small compared to the real world, adjust **camera FOV** in the panel and enter again.
+4. Tune with the **right thumbstick** while inside:
+   - **up/down = image size**: adjust until objects look as big as they really are (hold your hand out and compare).
+   - **left/right = camera delay**: turn your head side to side; adjust until the image stays still in the room instead of lagging behind or running ahead.
+   The values are remembered and also shown as sliders in the panel.
 
 `eff_int` auto mode uses **head motion** in the headset (it drops when you turn your head, builds up when you hold still).
 
-Known limits for now: one camera is shown to both eyes (no depth); the image follows your head and is slightly delayed, so it can "swim" on fast head turns. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
+The panel shows the camera resolution and frame rate, and the render frame rate. Check these first if something looks jerky.
+
+Known limits for now: one camera is shown to both eyes (no depth). The image is turned to stay put in the room between camera frames, but only for rotation, so nearby things can still shift a little when you move your head sideways. On a fast turn you briefly see the edge of the image. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
 
 ## Hosted version
 

@@ -29,12 +29,12 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 // deviceId: a specific camera (from the picker); otherwise the remembered one, else the default.
 async function useWebcam(deviceId) {
   const wanted = deviceId || loadPref('camId');
-  const anyCam = { width: 1280, height: 720 };
+  const anyCam = { width: { ideal: 1280 }, height: { ideal: 720 } };
   try {
     stopCamera();
     try {
       camStream = await navigator.mediaDevices.getUserMedia({
-        video: wanted ? { deviceId: { exact: wanted } } : anyCam, audio: false });
+        video: wanted ? { ...anyCam, height: { ideal: 960 }, deviceId: { exact: wanted } } : anyCam, audio: false });
     } catch (e) {
       if (!wanted) throw e;  // remembered camera is gone: fall back to the default one
       camStream = await navigator.mediaDevices.getUserMedia({ video: anyCam, audio: false });
@@ -71,6 +71,18 @@ async function useVideoFile(file) {
 
 function getSourceElement() {
   return video.readyState >= 2 && video.videoWidth > 0 ? video : null;
+}
+
+// New-frame timing from the browser (used for the fps readout and headset reprojection).
+// presentationTime is on the performance.now() clock.
+const camFrames = { count: 0, presentationTime: 0 };
+if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+  const onFrame = (now, meta) => {
+    camFrames.count++;
+    camFrames.presentationTime = meta.presentationTime || now;
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
 }
 
 // ============================================================================
@@ -474,12 +486,24 @@ function showEffInt() {
   $('effIntVal').textContent = effInt.toFixed(2);
 }
 
+// Stats readout, twice a second: camera size and fps, render fps.
+const stats = { renderFrames: 0, t0: performance.now(), cam0: 0 };
+setInterval(() => {
+  const now = performance.now(), secs = (now - stats.t0) / 1000;
+  const camFps = (camFrames.count - stats.cam0) / secs, renderFps = stats.renderFrames / secs;
+  stats.t0 = now; stats.cam0 = camFrames.count; stats.renderFrames = 0;
+  $('stats').textContent = video.videoWidth
+    ? `camera ${video.videoWidth}x${video.videoHeight} @ ${camFps.toFixed(0)} fps · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps`
+    : '';
+}, 500);
+
 // Flat page loop: chain -> canvas.
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - lastNow) / 1000);
   lastNow = now;
   if (xrSession) return;
+  stats.renderFrames++;
   resize();
 
   const src = getSourceElement();

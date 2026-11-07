@@ -33,6 +33,7 @@
   <div class="row"><button id="camBtn">Webcam</button><select id="camSel" hidden></select></div>
   <div class="row"><input id="fileIn" type="file" accept="video/*"></div>
   <div id="status">Pick webcam or a video (or drop a video file on the page).</div>
+  <div id="stats" class="note"></div>
   <h3>eff_int</h3>
   <div class="row">
     <input id="effInt" type="range" min="0" max="1" step="0.001" value="0.6">
@@ -43,9 +44,14 @@
     <h3>Headset</h3>
     <div class="row"><button id="xrBtn" disabled title="Start the webcam first">Enter VR</button></div>
     <div class="row">camera FOV
-      <input id="camFov" type="range" min="40" max="140" step="1" value="90" style="flex:1">
-      <span id="camFovVal">90°</span>
+      <input id="camFov" type="range" min="30" max="140" step="1" value="70" style="flex:1">
+      <span id="camFovVal">70°</span>
     </div>
+    <div class="row">camera delay
+      <input id="camDelay" type="range" min="0" max="250" step="5" value="60" style="flex:1">
+      <span id="camDelayVal">60 ms</span>
+    </div>
+    <div class="note">In VR: right thumbstick up/down = image size, left/right = delay.</div>
   </div>
   <h3>Chain</h3>
   <ol id="effects"></ol>
