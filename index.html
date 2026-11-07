@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VR Visuals Harness</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+               font: 13px/1.4 system-ui, sans-serif; color: #eee; }
+  #out { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #panel { position: fixed; top: 8px; left: 8px; width: 280px; max-height: calc(100% - 16px);
+           overflow: auto; background: rgba(20,20,20,0.82); border-radius: 6px; padding: 8px 10px; }
+  #panel.hidden > :not(#toggle) { display: none; }
+  #toggle { float: right; }
+  h3 { margin: 6px 0 4px; font-size: 12px; text-transform: uppercase; opacity: 0.7; }
+  button, input[type=file] { font: inherit; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  #effInt { flex: 1; }
+  #effIntVal { width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
+  ol { margin: 0; padding-left: 22px; }
+  li { margin: 2px 0; }
+  .err { color: #ff8080; font: 11px/1.3 monospace; white-space: pre-wrap; margin: 2px 0 4px; }
+  #status, .note { opacity: 0.7; font-size: 12px; }
+  .note { list-style: none; margin-top: 6px; }
+  body.drag #out { outline: 4px dashed #8cf; outline-offset: -4px; }
+</style>
+</head>
+<body>
+<canvas id="out"></canvas>
+<div id="panel">
+  <button id="toggle" title="Show/hide panel (H)">–</button>
+  <h3>Input</h3>
+  <div class="row"><button id="camBtn">Webcam</button></div>
+  <div class="row"><input id="fileIn" type="file" accept="video/*"></div>
+  <div id="status">Pick webcam or a video (or drop a video file on the page).</div>
+  <h3>eff_int</h3>
+  <div class="row">
+    <input id="effInt" type="range" min="0" max="1" step="0.001" value="0.6">
+    <span id="effIntVal">0.60</span>
+  </div>
+  <div class="row"><label><input id="auto" type="checkbox"> auto (builds when still, drops on motion)</label></div>
+  <h3>Chain</h3>
+  <ol id="effects"></ol>
+</div>
+<script src="harness.js"></script>
+</body>
+</html>

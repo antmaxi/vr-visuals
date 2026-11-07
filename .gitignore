@@ -1,0 +1,6 @@
+videos/*
+!videos/.gitkeep
+effects.json
+__pycache__/
+.DS_Store
+Thumbs.db
