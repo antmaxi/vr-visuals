@@ -483,7 +483,7 @@ function loadEffect(name, src) {
       loc: e.prog ? gl.getUniformLocation(e.prog, q.name) : null,
     };
   });
-  e.enabled = enabledState.has(name) ? enabledState.get(name) : true;
+  e.enabled = enabledState.has(name) ? enabledState.get(name) : false;   // new effects start unticked
   resetFeedback(e);
 }
 
