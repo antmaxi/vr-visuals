@@ -2,21 +2,17 @@
 // untouched. Toward the periphery the image bulges outward with slow ripples
 // flowing out from the centre, gets a soft glow, stronger colour, and a hue
 // shift that slowly travels around the ring.
+//
 // eff_int = 0 -> untouched image.
-// radius: where the periphery starts (0 = centre, 1 = top/bottom edge).
-// colour: saturation boost and hue shift in the periphery.
-// bulge: how much the periphery bulges outward (tunnel feel).
-// ripple_amp: how far the ripples push the image. Relative to the ripple
-// spacing, so it stays smooth at any ripple_freq.
-// ripple_freq: ripples between the centre and the top/bottom edge.
-// bulge and ripple_amp are squared, so the top of each slider is much
-// stronger than the bottom; the defaults are subtle.
 
-uniform float radius;      // @param 0 1.2 0.45
-uniform float colour;      // @param 0 1 0.6
-uniform float bulge;       // @param 0 1 0.35
-uniform float ripple_amp;  // @param 0 1 0.33
-uniform float ripple_freq; // @param 0.5 6 2.2
+uniform float radius;      // @param 0 1.2 0.45 Where the periphery starts: 0 = centre, 1 = top/bottom edge.
+uniform float colour;      // @param 0 1 0.6 Saturation boost and hue shift in the periphery.
+uniform float bulge;       // @param 0 1 0.35 How much the periphery bulges outward (tunnel feel).
+                           // Squared, so the top of the slider is much stronger than the bottom.
+uniform float ripple_amp;  // @param 0 1 0.33 How far the ripples push the image, relative to their
+                           // spacing, so it stays smooth at any ripple_freq. Squared like bulge.
+                           // Near 1 with strong bulge the image starts to fold over.
+uniform float ripple_freq; // @param 0.5 6 2.2 Number of ripples between the centre and the top/bottom edge.
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 

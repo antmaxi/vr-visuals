@@ -316,7 +316,7 @@ function setTexParams() {
 // ============================================================================
 // Effects: discovery, ordering, hot reload
 // ============================================================================
-/** name -> { name, src, prog, u, error, enabled, params, rts: per lane [a, b], cur: per lane index } */
+/** name -> { name, src, desc, prog, u, error, enabled, params, rts: per lane [a, b], cur: per lane index } */
 const effects = new Map();
 const enabledState = new Map();  // remembers checkbox state across reloads
 const paramState = new Map();    // "file:uniform" -> slider value the user set (survives reloads)
@@ -349,20 +349,54 @@ function computeOrder(names, order) {
   return out;
 }
 
+const COMMENT_RE = /^\s*\/\/ ?(.*)$/;
+
+// Comment lines -> text: lines are joined into paragraphs, an empty "//" line starts a new one.
+function joinComment(lines) {
+  const paras = [[]];
+  for (const l of lines.map((s) => s.trim())) {
+    if (l) paras[paras.length - 1].push(l);
+    else if (paras[paras.length - 1].length) paras.push([]);
+  }
+  return paras.filter((p) => p.length).map((p) => p.join(' ')).join('\n\n');
+}
+
+// Effect description: the comment block at the very top of the file (ends at the first non-comment line).
+function parseDescription(src) {
+  const lines = [];
+  for (const l of src.split(/\r?\n/)) {
+    const m = l.match(COMMENT_RE);
+    if (!m) break;
+    lines.push(m[1]);
+  }
+  return joinComment(lines);
+}
+
 // Per-effect sliders, declared in the effect file as:
-//   uniform float <name>; // @param <min> <max> <default>
-const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@param\b(.*)$/gm;
+//   uniform float <name>; // @param <min> <max> <default> <description>
+// Comment-only lines directly below continue the description.
+const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@param\b(.*)$/;
 
 function parseParams(name, src) {
   const out = [];
-  for (const m of src.matchAll(PARAM_RE)) {
-    const [min, max, def] = m[2].trim().split(/\s+/).map(Number);
-    if (![min, max, def].every(Number.isFinite) || !(max > min)) {
-      console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default>"`);
-      continue;
+  const lines = src.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    const m = line.match(PARAM_RE);
+    if (!m) return;
+    const [min, max, def, ...words] = m[2].trim().split(/\s+/);
+    const [lo, hi, d] = [min, max, def].map(Number);
+    if (![lo, hi, d].every(Number.isFinite) || !(hi > lo)) {
+      console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default> <description>"`);
+      return;
     }
-    out.push({ name: m[1], min, max, def: clamp(def, min, max) });
-  }
+    const desc = [words.join(' ')];
+    for (let j = i + 1; j < lines.length; j++) {
+      const c = lines[j].match(COMMENT_RE);
+      if (!c) break;
+      desc.push(c[1]);
+    }
+    out.push({ name: m[1], min: lo, max: hi, def: clamp(d, lo, hi), desc: joinComment(desc) });
+  });
   return out;
 }
 
@@ -376,6 +410,7 @@ function loadEffect(name, src) {
   }
   if (e.prog) gl.deleteProgram(e.prog);
   e.src = src; e.prog = null; e.u = null; e.error = null;
+  e.desc = parseDescription(src);
   try {
     const p = compileEffect(src);
     e.prog = p.prog; e.u = p.u;
@@ -454,7 +489,46 @@ async function poll() {
 // ============================================================================
 function setStatus(msg) { $('status').textContent = msg; }
 
+// Description bubble: click an effect or parameter name to open it; click it again,
+// click anywhere else or press Escape to close.
+const bubble = $('bubble');
+let bubbleAnchor = null;
+
+function toggleBubble(anchor, text, meta) {
+  if (bubbleAnchor === anchor) { hideBubble(); return; }
+  bubbleAnchor = anchor;
+  bubble.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    bubble.append(m);
+  }
+  bubble.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const b = bubble.getBoundingClientRect();
+  const top = r.bottom + 4 + b.height > innerHeight ? r.top - 4 - b.height : r.bottom + 4;
+  bubble.style.left = Math.max(8, Math.min(r.left, innerWidth - b.width - 8)) + 'px';
+  bubble.style.top = Math.max(8, top) + 'px';
+}
+
+function hideBubble() { bubble.hidden = true; bubbleAnchor = null; }
+
+function clickableName(text, onclick) {
+  const s = document.createElement('span');
+  s.className = 'name';
+  s.textContent = text;
+  s.onclick = onclick;
+  return s;
+}
+
+window.addEventListener('pointerdown', (ev) => {
+  if (!bubble.hidden && !bubble.contains(ev.target) && ev.target !== bubbleAnchor) hideBubble();
+});
+$('panel').addEventListener('scroll', hideBubble);
+
 function renderPanel() {
+  hideBubble();
   const ol = $('effects');
   ol.textContent = '';
   if (!chain.length) {
@@ -463,7 +537,6 @@ function renderPanel() {
   }
   for (const e of chain) {
     const li = document.createElement('li');
-    const label = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = e.enabled;
@@ -472,8 +545,10 @@ function renderPanel() {
       enabledState.set(e.name, cb.checked);
       if (cb.checked) resetFeedback(e);
     };
-    label.append(cb, ' ', e.name.replace(/\.glsl$/, ''));
-    li.append(label);
+    const title = clickableName(e.name.replace(/\.glsl$/, ''), () => toggleBubble(title,
+      e.desc || 'No description yet.',
+      e.desc ? 'effects/' + e.name : `Add one as a comment block at the very top of effects/${e.name}.`));
+    li.append(cb, ' ', title);
     if (!e.error) for (const q of e.params) li.append(paramRow(q));
     if (e.error) {
       const err = document.createElement('div');
@@ -493,13 +568,15 @@ function renderPanel() {
 function paramRow(q) {
   const row = document.createElement('div');
   row.className = 'row param';
-  const name = document.createElement('span');
-  name.textContent = q.name;
+  const range = `${q.min} .. ${q.max}, default ${q.def} (double-click the slider to reset)`;
+  const name = clickableName(q.name, () => toggleBubble(name,
+    q.desc || 'No description yet.',
+    q.desc ? range : range + '\nAdd one after the numbers on the @param line.'));
   const slider = document.createElement('input');
   slider.type = 'range';
   slider.min = q.min; slider.max = q.max; slider.step = (q.max - q.min) / 1000;
   slider.value = q.value;
-  slider.title = `${q.min} .. ${q.max}, default ${q.def} (double-click to reset)`;
+  slider.title = range;
   const val = document.createElement('span');
   val.className = 'val';
   const show = () => { val.textContent = q.value.toFixed(2); };
@@ -526,9 +603,10 @@ $('stereo').onchange = (ev) => {
 $('swapEyes').onchange = (ev) => savePref('swapEyes', ev.target.checked ? '1' : '0');
 $('camSel').onchange = (ev) => { savePref('camId', ev.target.value); useWebcam(ev.target.value); };
 $('fileIn').onchange = (ev) => { const f = ev.target.files[0]; if (f) useVideoFile(f); };
-$('toggle').onclick = () => $('panel').classList.toggle('hidden');
+$('toggle').onclick = () => { hideBubble(); $('panel').classList.toggle('hidden'); };
 window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'h' || ev.key === 'H') $('panel').classList.toggle('hidden');
+  if (ev.key === 'h' || ev.key === 'H') { hideBubble(); $('panel').classList.toggle('hidden'); }
+  if (ev.key === 'Escape') hideBubble();
 });
 window.addEventListener('dragover', (ev) => { ev.preventDefault(); document.body.classList.add('drag'); });
 window.addEventListener('dragleave', () => document.body.classList.remove('drag'));

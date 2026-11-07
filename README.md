@@ -35,14 +35,15 @@ If port 8000 is taken (`OSError: [Errno 98] Address already in use`, or the page
 
 Use `localhost` in the address, not your machine's IP: browsers only allow the webcam on `localhost` or HTTPS pages, and the server only listens on `localhost` anyway.
 
-If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (plus any sliders the effect declares), and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
+If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (plus any sliders the effect declares), and the `eff_int` slider. Click an effect's or a slider's name to see its description. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
 
 Saving an effect file updates the page within about a second. Compile errors appear next to the effect's name, with line numbers from your file; that effect is skipped and the rest keep running.
 
 ## Add an effect
 
 1. Copy `effects/_template.glsl` to `effects/<your_name>.glsl`.
-2. Edit `vec4 effect(vec2 uv)` (helper functions above it are fine). Available uniforms:
+2. Replace the first comment block with a short description of what the viewer sees. Clicking the effect's name in the panel shows it. The block ends at the first non-comment line; an empty `//` line starts a new paragraph.
+3. Edit `vec4 effect(vec2 uv)` (helper functions above it are fine). Available uniforms:
 
 | uniform | meaning |
 |---|---|
@@ -57,13 +58,14 @@ Saving an effect file updates the page within about a second. Compile errors app
 
 ### Effect parameters (sliders)
 
-To get a slider for your effect in the panel, declare a `float` uniform in your file with an `@param` comment giving min, max and default:
+To get a slider for your effect in the panel, declare a `float` uniform in your file with an `@param` comment giving min, max, default and a description. Comment-only lines directly below continue the description:
 
 ```glsl
-uniform float colorfulness; // @param -1 1 0
+uniform float colorfulness; // @param -1 1 0 Grey dream at -1, original colours at 0, saturated scene
+                            // with rainbow-tinted patterns at 1.
 ```
 
-The slider appears under your effect's checkbox and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
+Clicking the slider's name shows the description. The slider appears under your effect's checkbox and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
 
 ## Rules
 

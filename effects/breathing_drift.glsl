@@ -1,4 +1,7 @@
-// Breathing + drifting warp.
+// Breathing + drifting warp: regions of the image slowly swell and shrink out of
+// sync (about 5 s per breath), while a slowly changing swirl field makes the
+// texture drift around without bunching up.
+//
 // eff_int = 0 -> untouched image, 1 -> strongest.
 
 // ---------- noise ----------

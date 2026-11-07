@@ -1,3 +1,8 @@
+// <Effect name>: one or two sentences on what the viewer sees.
+// This top comment block is the description shown when you click the effect's
+// name in the panel; it ends at the first line that is not a comment (keep the
+// blank line below). An empty "//" line starts a new paragraph.
+
 // Effect template: copy this file to effects/<your_name>.glsl and edit the copy.
 // Files starting with "_" are ignored by the harness.
 //
@@ -11,8 +16,10 @@
 //   float     eff_int  0..1 effect intensity
 //   vec2      u_res    output size in pixels
 //
-// Optional sliders in the panel: declare a float uniform with min, max, default:
-//   uniform float my_amount; // @param 0 1 0.5
+// Optional sliders in the panel: declare a float uniform with min, max, default
+// and a description (shown when you click the slider's name). Comment-only lines
+// directly below continue the description:
+//   uniform float my_amount; // @param 0 1 0.5 How strongly the image swirls.
 //
 // Rules:
 // - eff_int = 0 must give output identical to the input, including any

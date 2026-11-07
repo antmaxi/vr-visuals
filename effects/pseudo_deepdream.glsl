@@ -2,15 +2,14 @@
 // Each frame the previous output is zoomed in slightly, flowed along its edges,
 // detail-amplified (unsharp mask) and recoloured, then pulled back toward the
 // live image. Patterns grow while eff_int stays up.
+//
 // eff_int = 0 -> output (and so the feedback state) is exactly the input.
-// colorfulness: -1 grey dream, 0 original colours, 1 saturated scene with
-// rainbow-tinted patterns.
-// eyes: dark points, line ends and corners in the live image turn into black
-// pupils (lines and straight edges don't), and the dream patterns flow around
-// them, like the "eyes" in DeepDream images.
 
-uniform float colorfulness; // @param -1 1 0
-uniform float eyes;         // @param 0 1 0.5
+uniform float colorfulness; // @param -1 1 0 Grey dream at -1, original colours at 0, saturated scene
+                            // with rainbow-tinted patterns at 1.
+uniform float eyes;         // @param 0 1 0.5 Dark points, line ends and corners in the live image turn
+                            // into black pupils (lines and straight edges don't), and the dream patterns
+                            // flow around them, like the "eyes" in DeepDream images.
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
