@@ -25,7 +25,8 @@ jobs:
       - name: Generate effects.json
         run: python3 serve.py --write-json
       - name: Stamp version (forces browsers to fetch the new scripts)
-        run: sed -i "s/v=dev/v=${GITHUB_SHA::7}/g; s/version: dev/version: ${GITHUB_SHA::7}/" index.html
+        run: |
+          sed -i "s/v=dev/v=${GITHUB_SHA::7}/g; s/version: dev/version: ${GITHUB_SHA::7}/" index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
