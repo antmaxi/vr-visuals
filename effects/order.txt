@@ -1,0 +1,5 @@
+# Chain order. Effects not listed here run after these, alphabetically,
+# so add new effects above peripheral_emphasis to keep it last.
+breathing_drift.glsl
+pseudo_deepdream.glsl
+peripheral_emphasis.glsl
