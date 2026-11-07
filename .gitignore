@@ -1,6 +1,10 @@
 videos/*
 !videos/.gitkeep
+audio/*
+!audio/.gitkeep
+!audio/README.md
 effects.json
+audio.json
 __pycache__/
 .DS_Store
 Thumbs.db

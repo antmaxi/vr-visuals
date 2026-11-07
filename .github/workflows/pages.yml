@@ -22,7 +22,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Generate effects.json
+      - name: Generate effects.json and audio.json
         run: python3 serve.py --write-json
       - name: Stamp version (forces browsers to fetch the new scripts)
         run: |

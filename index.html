@@ -84,6 +84,22 @@
     <input id="dropDepth" type="range" min="0" max="1" step="0.05" value="0.8" style="flex:1">
     <span id="dropDepthVal">0.80</span>
   </div>
+  <h3>Soundtrack</h3>
+  <div class="row">
+    <button id="audioBtn" disabled>Play</button>
+    <span id="audioStatus" class="note">looking for audio/…</span>
+  </div>
+  <div class="row" title="Head appear / disappear sounds come from the side the head is on. Tick this if left and right feel swapped.">
+    <label><input id="audioFlip" type="checkbox"> flip L/R of head sounds</label>
+  </div>
+  <div class="row" title="Overall loudness of the bed (and stinger). Double-click to reset.">volume
+    <input id="audioVol" type="range" min="0" max="1" step="0.01" value="0.6" style="flex:1">
+    <span id="audioVolVal">0.60</span>
+  </div>
+  <div class="row" title="How strongly the bed follows eff_int (level + brightness). 0 = flat mid bed, 1 = quiet/dull when low and open when high. Double-click to reset.">react
+    <input id="audioReact" type="range" min="0" max="1" step="0.01" value="1" style="flex:1">
+    <span id="audioReactVal">1.00</span>
+  </div>
   <div id="xrBox" hidden>
     <h3>Headset</h3>
     <div class="row"><button id="xrBtn" disabled title="Start the webcam first">Enter VR</button></div>
@@ -146,6 +162,7 @@
 <div id="version" class="note" style="position:fixed;right:8px;bottom:4px">version: dev</div>
 <script src="harness.js?v=dev"></script>
 <script src="heads.js?v=dev"></script>
+<script src="audio.js?v=dev"></script>
 <script src="xr.js?v=dev"></script>
 </body>
 </html>

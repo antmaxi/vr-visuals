@@ -362,6 +362,8 @@ async function initXR() {
 async function enterXR() {
   if (!getSourceElement() || xrSession) return;
   try {
+    // Keep a playing soundtrack alive: AudioContext suspends without a fresh user gesture.
+    if (typeof resumeSoundtrack === 'function') resumeSoundtrack();
     if (!presentProg) presentProg = linkProgram(PRESENT_FRAG, PRESENT_VERT);
     if (!hudProg) hudProg = linkProgram(HUD_FRAG, HUD_VERT);
     await gl.makeXRCompatible();
@@ -434,6 +436,7 @@ function xrFrameBody(now, frame, session) {
     readSticks(session, dt, now);
     const m = headMotion(pose.transform, dt);
     if (autoBox.checked) effInt = autoEffInt(effInt, dt, m);
+    if (typeof updateSoundtrack === 'function') updateSoundtrack(effInt, dt);
     updateCaptureOrientation(now, pose.transform.orientation);
     // u_look / u_gaze for effects: the head direction the camera frame was taken in.
     const [yaw, pitch] = qYawPitch(captureQ[0] || pose.transform.orientation);

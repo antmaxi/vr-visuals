@@ -1056,6 +1056,7 @@ function frame(now) {
   const src = getSourceElement();
   if (src && autoBox.checked) effInt = autoEffInt(effInt, dt, imageMotion(src));
   showEffInt();
+  if (typeof updateSoundtrack === 'function') updateSoundtrack(effInt, dt);
   // Mouse stand-in for head direction, eased like a real head turn.
   const ease = 1 - Math.exp(-dt / 0.15);
   simHead.sy += (simHead.yaw - simHead.sy) * ease;
