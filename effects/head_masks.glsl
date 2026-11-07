@@ -15,8 +15,8 @@
 // The defaults reach from just below the chin to about one face height above the brows.
 // Masks made from the camera image map head-space points back to the image with headToUv().
 
-uniform float mask;   // @choice glass|pixelate|pumpkin|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball|blackhole|kaleidoscope|disco|multiply
-                      // Which mask covers the faces. Glass (the default), pixelate, blackhole, kaleidoscope, disco and multiply are made from the camera image:
+uniform float mask;   // @choice glass|pixelate|blackhole|multiply|kaleidoscope|disco|pumpkin|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball
+                      // Which mask covers the faces. Glass (the default), pixelate, blackhole, multiply, kaleidoscope and disco are made from the camera image:
                       // blackhole swirls the room into a dark hole, kaleidoscope folds the person's
                       // own face, glass shows the room upside down in a crystal ball, disco reflects
                       // bits of the room in mirror tiles, pixelate hides the face behind big pixels.
@@ -507,7 +507,7 @@ vec4 effect(vec2 uv) {
     float aspect = u_res.x / u_res.y;
     int kind = int(mask + 0.5);
     float opacity = min(eff_int / (1.0 - 0.9 * opaqueness), 1.0);
-    float reach = kind == 16 ? cloneReach() : 1.2;
+    float reach = kind == 3 ? cloneReach() : 1.2;
     for (int i = 0; i < 8; i++) {
         if (i >= u_headCount) break;
         vec4 h = u_heads[i];
@@ -522,21 +522,21 @@ vec4 effect(vec2 uv) {
         float aa = 1.0 / (s * u_res.y);     // one pixel in head units
         vec4 mk;
         if (kind == 1) mk = pixelate(p, aa);
-        else if (kind == 2) mk = pumpkin(p, aa);
-        else if (kind == 3) mk = skull(p, aa);
-        else if (kind == 4) mk = pig(p, aa);
-        else if (kind == 5) mk = ghost(p, aa);
-        else if (kind == 6) mk = alien(p, aa);
-        else if (kind == 7) mk = cat(p, aa);
-        else if (kind == 8) mk = fox(p, aa);
-        else if (kind == 9) mk = robot(p, aa);
-        else if (kind == 10) mk = sun(p, aa);
-        else if (kind == 11) mk = moon(p, aa);
-        else if (kind == 12) mk = eyeball(p, aa);
-        else if (kind == 13) mk = blackhole(p, aa);
-        else if (kind == 14) mk = kaleidoscope(p, aa);
-        else if (kind == 15) mk = disco(p, aa);
-        else if (kind == 16) mk = multiply(p, aa);
+        else if (kind == 2) mk = blackhole(p, aa);
+        else if (kind == 3) mk = multiply(p, aa);
+        else if (kind == 4) mk = kaleidoscope(p, aa);
+        else if (kind == 5) mk = disco(p, aa);
+        else if (kind == 6) mk = pumpkin(p, aa);
+        else if (kind == 7) mk = skull(p, aa);
+        else if (kind == 8) mk = pig(p, aa);
+        else if (kind == 9) mk = ghost(p, aa);
+        else if (kind == 10) mk = alien(p, aa);
+        else if (kind == 11) mk = cat(p, aa);
+        else if (kind == 12) mk = fox(p, aa);
+        else if (kind == 13) mk = robot(p, aa);
+        else if (kind == 14) mk = sun(p, aa);
+        else if (kind == 15) mk = moon(p, aa);
+        else if (kind == 16) mk = eyeball(p, aa);
         else mk = glass(p, aa);
         col = mix(col, mk.rgb, mk.a * h.w * opacity);
     }
