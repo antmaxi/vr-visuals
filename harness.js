@@ -217,6 +217,8 @@ uniform sampler2D u_tex;
 uniform sampler2D u_prev;
 uniform float u_time;
 uniform float u_dt;
+uniform vec2 u_look;
+uniform vec2 u_gaze;
 uniform float eff_int;
 uniform vec2 u_res;
 `;
@@ -710,6 +712,8 @@ function draw(p, fbo, inTex, prevTex, time) {
   if (p.u.u_prev) { bindTex(1, prevTex); gl.uniform1i(p.u.u_prev, 1); }
   gl.uniform1f(p.u.u_time, time);
   gl.uniform1f(p.u.u_dt, frameDt);
+  gl.uniform2f(p.u.u_look, headLook[0], headLook[1]);
+  gl.uniform2f(p.u.u_gaze, headGaze[0], headGaze[1]);
   gl.uniform1f(p.u.eff_int, effInt);
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
@@ -719,6 +723,51 @@ function draw(p, fbo, inTex, prevTex, time) {
 const startTime = performance.now();
 let lastNow = startTime;
 let xrSession = null;   // set by xr.js while the headset mode is active
+
+// ============================================================================
+// Head direction for effects (u_look, u_gaze). xr.js feeds the headset's head
+// direction at camera-capture time; the flat page simulates it with a mouse drag
+// on the video (hold the button: the pointer position is where you "face").
+//   u_look: how far the scene has shifted across the image because the head
+//           turned (uv units). Effects that sample their pattern at
+//           uv - u_look keep it attached to the scene instead of the screen.
+//   u_gaze: which way the head is turning relative to a few seconds ago,
+//           -1..1 per axis (+x = right, +y = up); recenters when the head rests.
+// ============================================================================
+const GAZE_RECENTER = 2.5;     // s for u_gaze to settle back to 0 after a turn
+const GAZE_RANGE = 20;         // degrees of turn that give u_gaze = 1
+let headLook = [0, 0], headGaze = [0, 0];
+const headState = { yaw: null, accYaw: 0, refYaw: 0, refPitch: 0 };
+const simHead = { active: false, yaw: 0, pitch: 0, sy: 0, sp: 0 };   // flat-page mouse stand-in
+
+// yaw/pitch in radians (+yaw = turned right, +pitch = up), hfovDeg = camera horizontal FOV
+function updateHead(yaw, pitch, hfovDeg, dt) {
+  const s = headState;
+  if (s.yaw === null) { s.yaw = yaw; s.accYaw = yaw; s.refYaw = yaw; s.refPitch = pitch; }
+  let dy = yaw - s.yaw;                             // unwrap across +-180 deg
+  if (dy > Math.PI) dy -= 2 * Math.PI;
+  if (dy < -Math.PI) dy += 2 * Math.PI;
+  s.yaw = yaw;
+  s.accYaw += dy;
+  const f = 0.5 / Math.tan((hfovDeg / 2) * Math.PI / 180);   // uv per radian (small angles)
+  headLook = [-s.accYaw * f, -pitch * f * (rtW / Math.max(rtH, 1))];
+  const k = 1 - Math.exp(-dt / GAZE_RECENTER);
+  s.refYaw += (s.accYaw - s.refYaw) * k;
+  s.refPitch += (pitch - s.refPitch) * k;
+  const r = GAZE_RANGE * Math.PI / 180;
+  const c = (v) => Math.max(-1, Math.min(1, v));
+  headGaze = [c((s.accYaw - s.refYaw) / r), c((pitch - s.refPitch) / r)];
+}
+function resetHead() { headState.yaw = null; headLook = [0, 0]; headGaze = [0, 0]; }
+
+canvas.addEventListener('pointerdown', (ev) => { simHead.active = true; simPointer(ev); });
+canvas.addEventListener('pointermove', (ev) => { if (simHead.active) simPointer(ev); });
+window.addEventListener('pointerup', () => { simHead.active = false; simHead.yaw = 0; simHead.pitch = 0; });
+function simPointer(ev) {
+  const r = canvas.getBoundingClientRect();
+  simHead.yaw = ((ev.clientX - r.left) / r.width - 0.5) * 60 * Math.PI / 180;
+  simHead.pitch = (0.5 - (ev.clientY - r.top) / r.height) * 34 * Math.PI / 180;
+}
 let frameDt = 0;               // seconds since the previous chain render (clamped), for u_dt
 let lastChainTime = null;
 
@@ -752,6 +801,11 @@ function frame(now) {
   const src = getSourceElement();
   if (src && autoBox.checked) effInt = autoEffInt(effInt, dt, imageMotion(src));
   showEffInt();
+  // Mouse stand-in for head direction, eased like a real head turn.
+  const ease = 1 - Math.exp(-dt / 0.15);
+  simHead.sy += (simHead.yaw - simHead.sy) * ease;
+  simHead.sp += (simHead.pitch - simHead.sp) * ease;
+  updateHead(simHead.sy, simHead.sp, 70, dt);
 
   const out = renderChain((now - startTime) / 1000);
   if (!out) {

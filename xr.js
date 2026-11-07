@@ -210,6 +210,14 @@ function qNlerp(a, b, t) {
   const n = Math.hypot(q.x, q.y, q.z, q.w);
   return { x: q.x / n, y: q.y / n, z: q.z / n, w: q.w / n };
 }
+// Head yaw / pitch (radians) of the forward direction (0, 0, -1):
+// +yaw = turned right, +pitch = looking up.
+function qYawPitch(q) {
+  const fx = -2 * (q.w * q.y + q.x * q.z);
+  const fy = 2 * (q.w * q.x - q.y * q.z);
+  const fz = -1 + 2 * (q.x * q.x + q.y * q.y);
+  return [Math.atan2(fx, -fz), Math.asin(Math.max(-1, Math.min(1, fy)))];
+}
 function qToMat3(q) {   // column-major
   const { x, y, z, w } = q;
   return new Float32Array([
@@ -297,7 +305,7 @@ async function enterXR() {
     xrRefSpace = await session.requestReferenceSpace('local');
     session.addEventListener('end', () => {
       xrSession = null;
-      lastPose = null; captureQ.fill(null); history.length = 0;
+      lastPose = null; captureQ.fill(null); history.length = 0; resetHead();
       rotSpeed = moveSpeed = 0; xrLast = 0;
       for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert]) t.save();
       setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}. ` +
@@ -350,6 +358,9 @@ function xrFrame(now, frame) {
     const m = headMotion(pose.transform, dt);
     if (autoBox.checked) effInt = autoEffInt(effInt, dt, m);
     updateCaptureOrientation(now, pose.transform.orientation);
+    // u_look / u_gaze for effects: the head direction the camera frame was taken in.
+    const [yaw, pitch] = qYawPitch(captureQ[0] || pose.transform.orientation);
+    updateHead(yaw, pitch, camFov.value, dt);
     const src = getSourceElement();
     if (!src) problem = problem || 'no camera frame - is the webcam running?';
     else drawCamera(now, pose, layer, src);

@@ -13,6 +13,8 @@
 //   sampler2D u_prev   this effect's own output from the last frame (feedback)
 //   float     u_time   seconds
 //   float     u_dt     seconds since the previous frame (max 0.1)
+//   vec2      u_look   scene shift from head rotation (uv); sample at uv - u_look to stick to the scene
+//   vec2      u_gaze   head turn direction, -1..1 (+x right, +y up), recenters at rest
 //   float     eff_int  0..1 effect intensity
 //   vec2      u_res    output size in pixels
 //
