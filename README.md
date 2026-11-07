@@ -10,7 +10,7 @@ python3 serve.py
 
 Open http://localhost:8000, click **Webcam** or pick / drop a video file (put your test videos in `videos/`; they are not committed).
 
-The panel shows the effect chain, one checkbox per effect, and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
+If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect, and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
 
 Saving an effect file updates the page within about a second. Compile errors appear next to the effect's name, with line numbers from your file; that effect is skipped and the rest keep running.
 
@@ -48,6 +48,19 @@ git add effects/<your_name>.glsl           # 3. stage your file
 git commit -m "Update <your_name> effect"  # 4. save a snapshot
 git push                                   # 5. share it (if rejected: git pull, then push again)
 ```
+
+## On the Quest (headset mode)
+
+The headset's cameras can only be used on a secure page, so open the **GitHub Pages URL** in the Quest Browser. For your own laptop's server, connect the Quest by USB with developer mode on, run `adb reverse tcp:8000 tcp:8000`, and open `http://localhost:8000` on the Quest.
+
+1. Allow camera access: in the Quest Browser's settings/permissions, allow **Headset cameras** (otherwise only the avatar camera is offered).
+2. Tap **Webcam**, allow access, and pick the passthrough camera (e.g. "camera 1 ... facing back") in the dropdown that appears.
+3. Tap **Enter VR**. The processed camera image fills your view. Press the Meta/menu button to leave.
+4. If the image looks too big or small compared to the real world, adjust **camera FOV** in the panel and enter again.
+
+`eff_int` auto mode uses **head motion** in the headset (it drops when you turn your head, builds up when you hold still).
+
+Known limits for now: one camera is shown to both eyes (no depth); the image follows your head and is slightly delayed, so it can "swim" on fast head turns. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
 
 ## Hosted version
 

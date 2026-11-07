@@ -22,17 +22,42 @@ function stopCamera() {
   camStream = null;
 }
 
-async function useWebcam() {
+// Per-viewer preferences (camera choice, FOV). Storage can be unavailable; never rely on it.
+function loadPref(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function savePref(key, value) { try { localStorage.setItem(key, value); } catch { /* ignore */ } }
+
+// deviceId: a specific camera (from the picker); otherwise the remembered one, else the default.
+async function useWebcam(deviceId) {
+  const wanted = deviceId || loadPref('camId');
+  const anyCam = { width: 1280, height: 720 };
   try {
     stopCamera();
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: wanted ? { deviceId: { exact: wanted } } : anyCam, audio: false });
+    } catch (e) {
+      if (!wanted) throw e;  // remembered camera is gone: fall back to the default one
+      camStream = await navigator.mediaDevices.getUserMedia({ video: anyCam, audio: false });
+    }
     video.removeAttribute('src');
     video.srcObject = camStream;
     await video.play();
-    setStatus('Webcam');
+    const label = camStream.getVideoTracks()[0].label;
+    setStatus('Webcam' + (label ? ': ' + label : ''));
+    await fillCameraList();
   } catch (e) {
     setStatus('Webcam failed: ' + e.message);
   }
+}
+
+// Camera labels are only available after permission, so fill the picker after the first start.
+async function fillCameraList() {
+  const sel = $('camSel');
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  const current = camStream && camStream.getVideoTracks()[0].getSettings().deviceId;
+  sel.textContent = '';
+  cams.forEach((d, i) => sel.add(new Option(d.label || `camera ${i + 1}`, d.deviceId, false, d.deviceId === current)));
+  sel.hidden = cams.length < 2;
 }
 
 async function useVideoFile(file) {
@@ -84,9 +109,14 @@ function smoothstep(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 
-// Returns the new eff_int given the current one.
-function autoEffInt(current, dt, src) {
-  const m = smoothstep(STILL_DIFF, MOVING_DIFF, measureMotion(src));
+// Motion of the image (0 = still, 1 = moving), from frame differences.
+function imageMotion(src) {
+  return smoothstep(STILL_DIFF, MOVING_DIFF, measureMotion(src));
+}
+
+// Returns the new eff_int given the current one and a motion amount m (0 = still, 1 = moving).
+// The flat page passes imageMotion(); the headset mode (xr.js) passes head motion.
+function autoEffInt(current, dt, m) {
   const next = current + (1 - m) * dt / BUILD_SECONDS - m * dt / DROP_SECONDS;
   return Math.min(1, Math.max(0, next));
 }
@@ -140,21 +170,26 @@ function compileShader(type, src) {
 }
 
 let vertShader = null;
-function linkProgram(fragSrc) {
+// vertSrc: optional custom vertex shader (default: fullscreen triangle).
+function linkProgram(fragSrc, vertSrc) {
   if (!vertShader) vertShader = compileShader(gl.VERTEX_SHADER, VERT);
+  const vs = vertSrc ? compileShader(gl.VERTEX_SHADER, vertSrc) : vertShader;
   const fs = compileShader(gl.FRAGMENT_SHADER, fragSrc);
   const p = gl.createProgram();
-  gl.attachShader(p, vertShader);
+  gl.attachShader(p, vs);
   gl.attachShader(p, fs);
   gl.linkProgram(p);
   gl.deleteShader(fs);
+  if (vertSrc) gl.deleteShader(vs);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
     const log = gl.getProgramInfoLog(p) || 'unknown link error';
     gl.deleteProgram(p);
     throw new Error(log);
   }
   const u = {};
-  for (const name of ['u_tex', 'u_prev', 'u_time', 'eff_int', 'u_res', 'u_scale']) {
+  const count = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < count; i++) {
+    const name = gl.getActiveUniform(p, i).name;
     u[name] = gl.getUniformLocation(p, name);
   }
   return { prog: p, u };
@@ -353,7 +388,8 @@ let effInt = Number(effIntSlider.value);
 effIntSlider.oninput = () => { effInt = Number(effIntSlider.value); };
 autoBox.onchange = () => { effIntSlider.disabled = autoBox.checked; prevLuma = null; };
 
-$('camBtn').onclick = useWebcam;
+$('camBtn').onclick = () => useWebcam();
+$('camSel').onchange = (ev) => { savePref('camId', ev.target.value); useWebcam(ev.target.value); };
 $('fileIn').onchange = (ev) => { const f = ev.target.files[0]; if (f) useVideoFile(f); };
 $('toggle').onclick = () => $('panel').classList.toggle('hidden');
 window.addEventListener('keydown', (ev) => {
@@ -382,14 +418,24 @@ function initGL() {
   setTexParams();
 }
 
+// Fit (w, h) inside MAX_DIM, keeping the aspect ratio.
+function capSize(w, h) {
+  const s = Math.min(1, MAX_DIM / Math.max(w, h));
+  return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))];
+}
+
+// Flat page: render targets match the canvas.
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  let w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
-  const s = Math.min(1, MAX_DIM / Math.max(w, h));
-  w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
+  const [w, h] = capSize(Math.round(canvas.clientWidth * dpr), Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  setTargetSize(w, h);
+}
+
+// (Re)create all render targets at w x h. Headset mode sizes them to the camera instead.
+function setTargetSize(w, h) {
   if (w === rtW && h === rtH) return;
   rtW = w; rtH = h;
-  canvas.width = w; canvas.height = h;
   freeTarget(sourceRT);
   sourceRT = makeTarget(w, h);
   for (const e of effects.values()) {
@@ -421,27 +467,40 @@ function draw(p, fbo, inTex, prevTex, time) {
 
 const startTime = performance.now();
 let lastNow = startTime;
+let xrSession = null;   // set by xr.js while the headset mode is active
 
+function showEffInt() {
+  if (autoBox.checked) effIntSlider.value = effInt;
+  $('effIntVal').textContent = effInt.toFixed(2);
+}
+
+// Flat page loop: chain -> canvas.
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - lastNow) / 1000);
   lastNow = now;
-  const time = (now - startTime) / 1000;
+  if (xrSession) return;
   resize();
 
   const src = getSourceElement();
-  if (!src) {
+  if (src && autoBox.checked) effInt = autoEffInt(effInt, dt, imageMotion(src));
+  showEffInt();
+
+  const out = renderChain((now - startTime) / 1000);
+  if (!out) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     return;
   }
+  draw(copyProg, null, out, null, 0);
+}
 
-  if (autoBox.checked) {
-    effInt = autoEffInt(effInt, dt, src);
-    effIntSlider.value = effInt;
-  }
-  $('effIntVal').textContent = effInt.toFixed(2);
+// Upload the current source frame and run the effect chain into the render targets.
+// Returns the final texture, or null when there is no source yet.
+function renderChain(time) {
+  const src = getSourceElement();
+  if (!src) return null;
 
   // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy).
   bindTex(0, sourceTex);
@@ -449,7 +508,7 @@ function frame(now) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-  // Source pass: cover-fit into the first render target.
+  // Source pass: cover-fit into the first render target ((1,1) when the aspects match).
   const ca = rtW / rtH, va = src.videoWidth / src.videoHeight;
   gl.useProgram(sourceProg.prog);
   gl.uniform2f(sourceProg.u.u_scale, ca > va ? 1 : ca / va, ca > va ? va / ca : 1);
@@ -465,9 +524,7 @@ function frame(now) {
     e.cur = 1 - e.cur;
     input = write.tex;
   }
-
-  // To screen.
-  draw(copyProg, null, input, null, time);
+  return input;
 }
 
 if (gl) {
