@@ -709,11 +709,67 @@ $('stereo').onchange = (ev) => {
 $('swapEyes').onchange = (ev) => savePref('swapEyes', ev.target.checked ? '1' : '0');
 $('camSel').onchange = (ev) => { savePref('camId', ev.target.value); useWebcam(ev.target.value); };
 $('fileIn').onchange = (ev) => { const f = ev.target.files[0]; if (f) useVideoFile(f); };
-$('toggle').onclick = () => { hideBubble(); $('panel').classList.toggle('hidden'); };
+
+// Call mode: fixed 16:9 output + hidden chrome for OBS Virtual Camera / Window Capture.
+const CALL_SIZES = { '720': [1280, 720], '1080': [1920, 1080] };
+let callMode = false;
+let callSizeKey = loadPref('callSize') === '1080' ? '1080' : '720';
+let callHintTimer = 0;
+$('callSize').value = callSizeKey;
+$('callSize').onchange = (ev) => {
+  callSizeKey = ev.target.value === '1080' ? '1080' : '720';
+  savePref('callSize', callSizeKey);
+  if (callMode) resize();
+};
+function showCallHint() {
+  const hint = $('callHint');
+  const [w, h] = CALL_SIZES[callSizeKey];
+  hint.textContent = `Call mode ${w}×${h} · H = panel · Esc = exit`;
+  hint.hidden = false;
+  hint.classList.add('show');
+  clearTimeout(callHintTimer);
+  callHintTimer = setTimeout(() => hint.classList.remove('show'), 4000);
+}
+function setCallMode(on) {
+  callMode = !!on;
+  $('callMode').checked = callMode;
+  document.body.classList.toggle('call-mode', callMode);
+  document.body.classList.remove('show-ui');
+  hideBubble();
+  if (callMode) {
+    $('panel').classList.remove('hidden'); // visibility is CSS via body.call-mode
+    showCallHint();
+  } else {
+    $('callHint').hidden = true;
+    $('callHint').classList.remove('show');
+  }
+  resize();
+}
+$('callMode').onchange = (ev) => setCallMode(ev.target.checked);
+$('toggle').onclick = () => {
+  hideBubble();
+  if (callMode) document.body.classList.toggle('show-ui');
+  else $('panel').classList.toggle('hidden');
+};
 window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'h' || ev.key === 'H') { hideBubble(); $('panel').classList.toggle('hidden'); }
-  if (ev.key === 'Escape') hideBubble();
+  if (ev.key === 'Escape') {
+    if (callMode) { setCallMode(false); return; }
+    hideBubble();
+    return;
+  }
+  if (ev.key === 'h' || ev.key === 'H') {
+    hideBubble();
+    if (callMode) document.body.classList.toggle('show-ui');
+    else $('panel').classList.toggle('hidden');
+  }
 });
+{
+  const q = new URLSearchParams(location.search).get('call');
+  if (q !== null) {
+    if (q === '1080' || q === '720') { callSizeKey = q; $('callSize').value = q; savePref('callSize', q); }
+    setCallMode(true);
+  }
+}
 window.addEventListener('dragover', (ev) => { ev.preventDefault(); document.body.classList.add('drag'); });
 window.addEventListener('dragleave', () => document.body.classList.remove('drag'));
 window.addEventListener('drop', (ev) => {
@@ -749,8 +805,14 @@ function capSize(w, h) {
   return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))];
 }
 
-// Flat page: render targets match the canvas.
+// Flat page: render targets match the canvas. Call mode locks to a fixed 16:9 size (no DPR).
 function resize() {
+  if (callMode) {
+    const [w, h] = CALL_SIZES[callSizeKey] || CALL_SIZES['720'];
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    setTargetSize(w, h);
+    return;
+  }
   const dpr = window.devicePixelRatio || 1;
   const [w, h] = capSize(Math.round(canvas.clientWidth * dpr), Math.round(canvas.clientHeight * dpr));
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
@@ -977,6 +1039,7 @@ setInterval(() => {
   const cams = stereoOn ? `L ${fps[0].toFixed(0)} / R ${fps[1].toFixed(0)} fps` : `${fps[0].toFixed(0)} fps`;
   $('stats').textContent = video.videoWidth
     ? `camera ${video.videoWidth}x${video.videoHeight} @ ${cams} · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps · stereo ${stereoInfo}` +
+      (callMode ? ' · call' : '') +
       (headsInfo() ? ' · ' + headsInfo() : '')
     : '';
 }, 500);

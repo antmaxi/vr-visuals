@@ -8,6 +8,18 @@
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
                font: 13px/1.4 system-ui, sans-serif; color: #eee; }
   #out { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  /* Call mode: fixed 16:9 buffer, letterboxed in the window for clean OBS capture. */
+  body.call-mode #out {
+    inset: auto; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(100vw, 100vh * 16 / 9); height: min(100vh, 100vw * 9 / 16);
+  }
+  body.call-mode:not(.show-ui) #panel,
+  body.call-mode:not(.show-ui) #version { display: none; }
+  #callHint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+              padding: 6px 10px; background: rgba(20,20,20,0.82); border-radius: 6px;
+              font-size: 12px; opacity: 0; pointer-events: none; transition: opacity 0.4s;
+              z-index: 5; white-space: nowrap; }
+  #callHint.show { opacity: 0.85; }
   #panel { position: fixed; top: 8px; left: 8px; width: 280px; max-height: calc(100% - 16px);
            overflow: auto; background: rgba(20,20,20,0.82); border-radius: 6px; padding: 8px 10px; }
   #panel.hidden > :not(#toggle) { display: none; }
@@ -49,6 +61,13 @@
     <label><input id="swapEyes" type="checkbox"> swap eyes</label>
   </div>
   <div class="row"><input id="fileIn" type="file" accept="video/*"></div>
+  <div class="row" title="Locks the picture to a fixed size and hides the UI so OBS can capture a clean feed for Zoom / Meet.">
+    <label><input id="callMode" type="checkbox"> call mode</label>
+    <select id="callSize" title="Output size for call mode">
+      <option value="720">1280×720</option>
+      <option value="1080">1920×1080</option>
+    </select>
+  </div>
   <div id="status">Pick webcam or a video (or drop a video file on the page).</div>
   <div id="stats" class="note"></div>
   <h3>eff_int</h3>
@@ -123,6 +142,7 @@
   <ol id="effects"></ol>
 </div>
 <div id="bubble" hidden></div>
+<div id="callHint" hidden>Call mode · H = panel · Esc = exit</div>
 <div id="version" class="note" style="position:fixed;right:8px;bottom:4px">version: dev</div>
 <script src="harness.js?v=dev"></script>
 <script src="heads.js?v=dev"></script>
