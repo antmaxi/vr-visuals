@@ -53,9 +53,15 @@ const PRESENT_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_tex;
 uniform float u_alpha;
+uniform vec2 u_fade;   // soft edge width in uv units (x, y), same angle on both axes; 0 = hard edge
 in vec2 v_uv;
 out vec4 o;
-void main() { o = vec4(texture(u_tex, v_uv).rgb * u_alpha, u_alpha); }`;  // premultiplied
+void main() {
+  vec2 d = min(v_uv, 1.0 - v_uv);   // distance to the nearest edge, per axis
+  float edge = smoothstep(0.0, max(u_fade.x, 1e-4), d.x) * smoothstep(0.0, max(u_fade.y, 1e-4), d.y);
+  float a = u_alpha * edge;
+  o = vec4(texture(u_tex, v_uv).rgb * a, a);   // premultiplied: fades into the passthrough
+}`;
 
 // Text display: a head-locked rectangle (in view space at distance 1) showing a canvas.
 const HUD_VERT = `#version 300 es
@@ -107,6 +113,7 @@ const matchDist = tunable('matchDist', 'matchDist', 1.5, ' m', 2);
 const camSide = tunable('camSide', 'camSide', 0, ' cm', 1);  // + = camera further out than the eye
 const camFwd = tunable('camFwd', 'camFwd', 5, ' cm', 1);     // + = camera in front of the eye
 const camUp = tunable('camUp', 'camUp', -1, ' cm', 1);       // + = camera above the eye
+const edgeFade = tunable('edgeFade', 'edgeFade', 6, '°', 1);  // soft edge width (degrees of view)
 
 // Diagnostics: shown in the text display and in the status line when leaving VR.
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
@@ -470,6 +477,11 @@ function drawCamera(now, pose, layer, src) {
     bindTex(0, outs[lane]);
     gl.uniform1i(presentProg.u.u_tex, 0);
     gl.uniform1f(presentProg.u.u_alpha, adjusting && xrMode === 'immersive-ar' ? ADJUST_ALPHA : 1);
+    // Soft edges: the image spans 2*atan(hx) degrees across; convert the fade angle to uv units.
+    const fadeX = edgeFade.value / (2 * Math.atan(hx) * 180 / Math.PI);
+    const hy = hx * laneSrc.videoHeight / laneSrc.videoWidth;
+    const fadeY = edgeFade.value / (2 * Math.atan(hy) * 180 / Math.PI);
+    gl.uniform2f(presentProg.u.u_fade, Math.min(0.5, fadeX), Math.min(0.5, fadeY));
     gl.uniform2f(presentProg.u.u_half, hx, hx * laneSrc.videoHeight / laneSrc.videoWidth);
     gl.uniform1f(presentProg.u.u_dist, matchDist.value);
     gl.uniformMatrix4fv(presentProg.u.u_proj, false, view.projectionMatrix);
