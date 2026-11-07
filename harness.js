@@ -460,7 +460,8 @@ function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
 function loadEffect(name, src) {
   let e = effects.get(name);
   if (!e) {
-    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [[null, null], [null, null]], cur: [0, 0] };
+    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [[null, null], [null, null]], cur: [0, 0],
+          strength: loadStrength(name) };
     effects.set(name, e);
   }
   if (e.prog) gl.deleteProgram(e.prog);
@@ -603,7 +604,7 @@ function renderPanel() {
     const title = clickableName(e.name.replace(/\.glsl$/, ''), () => toggleBubble(title,
       e.desc || 'No description yet.',
       e.desc ? 'effects/' + e.name : `Add one as a comment block at the very top of effects/${e.name}.`));
-    li.append(cb, ' ', title);
+    li.append(cb, ' ', title, strengthRow(e));
     if (!e.error && e.params.length) {
       // "parameters" button next to the name: shows/hides this effect's sliders.
       const box = document.createElement('div');
@@ -637,6 +638,35 @@ function renderPanel() {
   orderNote.className = 'note';
   orderNote.textContent = orderText === null ? 'order: no order.txt (alphabetical)' : 'order: from order.txt, then alphabetical';
   ol.append(orderNote);
+}
+
+// Per-effect strength: multiplies the shared eff_int for this effect (0..2, default 1),
+// remembered per effect in this browser. Double-click the slider to reset to 1.
+function loadStrength(name) {
+  const v = Number(loadPref('strength:' + name));
+  return loadPref('strength:' + name) !== null && Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1;
+}
+
+function strengthRow(e) {
+  const row = document.createElement('div');
+  row.className = 'row param';
+  const name = document.createElement('span');
+  name.textContent = 'strength';
+  name.title = 'This effect gets eff_int x strength (capped at 1). 0 = off, 1 = normal, 2 = full strength at half eff_int.';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = 0; slider.max = 2; slider.step = 0.01;
+  slider.value = e.strength;
+  slider.title = '0 .. 2, default 1 (double-click to reset)';
+  const val = document.createElement('span');
+  val.className = 'val';
+  const show = () => { val.textContent = e.strength.toFixed(2); };
+  const set = (v) => { e.strength = v; savePref('strength:' + e.name, v); show(); };
+  slider.oninput = () => set(Number(slider.value));
+  slider.ondblclick = () => { slider.value = 1; set(1); };
+  show();
+  row.append(name, slider, val);
+  return row;
 }
 
 // Hide the parameters whose "@when <other>=<value>" doesn't hold right now.
@@ -849,7 +879,9 @@ function draw(p, fbo, inTex, prevTex, time) {
   gl.uniform2f(p.u.u_gaze, headGaze[0], headGaze[1]);
   gl.uniform2f(p.u.u_focus, focus.pos[0], focus.pos[1]);
   gl.uniform2f(p.u.u_focusVel, focus.vel[0], focus.vel[1]);
-  gl.uniform1f(p.u.eff_int, effInt);
+  // Per-effect strength (0..2) scales the shared eff_int; clamped so effects still get 0..1,
+  // and eff_int = 0 stays 0 whatever the strength.
+  gl.uniform1f(p.u.eff_int, Math.min(1, effInt * (p.strength === undefined ? 1 : p.strength)));
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
   if (p.u['u_heads[0]']) {
