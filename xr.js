@@ -188,7 +188,7 @@ function readSticks(session, dt, now) {
 const hudCanvas = document.createElement('canvas');
 hudCanvas.width = 1024; hudCanvas.height = 362;
 const hudCtx = hudCanvas.getContext('2d');
-let hudTex = null, hudText = '';
+let hudTex = null, hudText = '', hudDrawnAt = 0;
 
 function updateHud(problem = '') {
   const cams = lanes.map((l, i) => i === 0 || stereoOn ? Math.round(camFps[i]) : null).filter((v) => v !== null).join('/');
@@ -202,11 +202,15 @@ function updateHud(problem = '') {
     eyeCheck && stereoOn
       ? `EYE CHECK: both eyes see camera ${eyeCheck === 1 ? 'A' : 'B'} = "${lanes[eyeCheck - 1].label}"  (A/X = next)`
       : `stereo ${stereoInfo}   sep ${camSep.text()}  vert ${camVert.text()}   A/X = eye check`,
-    `sticks  L[${input.raw.left}]  R[${input.raw.right}]   VR ${Math.round(xrPerf.fps)} fps  camera ${cams} fps  render ${rtW}x${rtH}`,
+    `VR ${Math.round(xrPerf.fps)} fps  frame ${xrPerf.ms.toFixed(1)} ms (worst ${xrPerf.worstMs.toFixed(0)})  camera ${cams} fps  render ${rtW}x${rtH}  sticks L[${input.raw.left}] R[${input.raw.right}]`,
     problem,
   ];
   const text = lines.join('\n');
   if (text === hudText && hudTex) return;
+  // Redrawing + uploading the text canvas costs time: at most 10 times a second.
+  const t = performance.now();
+  if (hudTex && t - hudDrawnAt < 100) return;
+  hudDrawnAt = t;
   hudText = text;
   const c = hudCtx;
   c.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
@@ -386,7 +390,7 @@ async function enterXR() {
 
 // Problems shown in VR (and in the status line after leaving).
 let xrError = '';
-const xrPerf = { frames: 0, t0: 0, fps: 0, slowSince: 0 };
+const xrPerf = { frames: 0, t0: 0, fps: 0, slowSince: 0, ms: 0, worstMs: 0, worst: 0 };
 if (canvas) canvas.addEventListener('webglcontextlost', () => {
   xrError = 'GPU context lost (effects too heavy?). Reload the page.';
   setStatus(xrError);
@@ -395,6 +399,17 @@ if (canvas) canvas.addEventListener('webglcontextlost', () => {
 function xrFrame(now, frame) {
   const session = frame.session;
   session.requestAnimationFrame(xrFrame);
+  const t0 = performance.now();
+  try { xrFrameBody(now, frame, session); }
+  finally {
+    // CPU time of this frame (JS + GL calls; GPU work may add to it), average and worst per second.
+    const ms = performance.now() - t0;
+    xrPerf.ms += (ms - xrPerf.ms) * 0.05;
+    xrPerf.worst = Math.max(xrPerf.worst, ms);
+  }
+}
+
+function xrFrameBody(now, frame, session) {
   const dt = xrLast ? Math.min(0.1, (now - xrLast) / 1000) : 0;
   xrLast = now;
   stats.renderFrames++;
@@ -403,6 +418,7 @@ function xrFrame(now, frame) {
   if (now - xrPerf.t0 > 1000) {
     xrPerf.fps = (xrPerf.frames * 1000) / (now - xrPerf.t0 || 1);
     xrPerf.frames = 0; xrPerf.t0 = now;
+    xrPerf.worstMs = xrPerf.worst; xrPerf.worst = 0;
     xrPerf.slowSince = xrPerf.fps < 30 ? xrPerf.slowSince || now : 0;
   }
 

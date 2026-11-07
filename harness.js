@@ -728,6 +728,8 @@ window.addEventListener('drop', (ev) => {
 // ============================================================================
 let sourceProg, copyProg;
 const sourceTex = [null, null];   // per lane: uploaded camera frame
+const uploadedFrame = [-1, -1];   // per lane: camera frame count at the last upload
+const uploadedSrc = [null, null];
 const sourceRT = [null, null];    // per lane: cover-fitted input to the chain
 
 function initGL() {
@@ -918,6 +920,11 @@ function findFocusTarget(src) {
   return [bx, by];
 }
 
+// Only effects that read u_focus / u_focusVel need the analysis (unused uniforms are inactive).
+function focusWanted() {
+  return chain.some((e) => e.enabled && e.prog && (e.u.u_focus || e.u.u_focusVel));
+}
+
 function updateFocus(src, time, dt) {
   if (time - focus.last >= 1 / FOCUS_HZ || focus.last < 0 || time < focus.last) {
     focus.last = time;
@@ -1013,14 +1020,23 @@ function renderChain(time, lane = 0) {
   }
   const src = getSourceElement(lane);
   if (!src) return null;
-  if (lane === 0) updateFocus(src, time, frameDt);
+  // u_focus analysis reads pixels back from the GPU (a stall, ~20x a second): only when used.
+  if (lane === 0 && focusWanted()) updateFocus(src, time, frameDt);
   if (!sourceRT[lane]) sourceRT[lane] = makeTarget(rtW, rtH);
 
-  // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy).
-  bindTex(0, sourceTex[lane]);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy). Only when the camera
+  // delivered a new frame: the display runs at 72-90 fps, the camera at ~30, and re-uploading
+  // the same 1280x960 picture (twice in stereo) is a big part of the frame time on the headset.
+  // (Without frame callbacks the count stays 0: then upload every frame.)
+  const fc = lanes[lane].frames.count;
+  if (!fc || fc !== uploadedFrame[lane] || src !== uploadedSrc[lane]) {
+    uploadedFrame[lane] = fc;
+    uploadedSrc[lane] = src;
+    bindTex(0, sourceTex[lane]);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  }
 
   // Source pass: cover-fit into the first render target ((1,1) when the aspects match).
   const ca = rtW / rtH, va = src.videoWidth / src.videoHeight;
