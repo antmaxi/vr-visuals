@@ -24,7 +24,7 @@
   .params[hidden] { display: none; }
   .param { margin: 1px 0; font-size: 12px; }
   .param span:first-child { opacity: 0.8; }
-  .param input { flex: 1; min-width: 0; }
+  .param input, .param select { flex: 1; min-width: 0; }
   .param .val { width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
   .name { cursor: pointer; border-bottom: 1px dotted rgba(255,255,255,0.4); }
   .name:hover { border-bottom-color: #fff; }
@@ -121,6 +121,7 @@
 <div id="bubble" hidden></div>
 <div id="version" class="note" style="position:fixed;right:8px;bottom:4px">version: dev</div>
 <script src="harness.js?v=dev"></script>
+<script src="heads.js?v=dev"></script>
 <script src="xr.js?v=dev"></script>
 </body>
 </html>

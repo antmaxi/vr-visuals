@@ -15,6 +15,7 @@ Every effect and every effect parameter must have a description. The panel shows
   ```
 
   Say what the slider does at its low and high end, and mention anything non-obvious (e.g. a squared response, or settings that look bad when combined).
+- **Dropdown parameters:** `uniform float <name>; // @choice a|b|c <description>` gives a dropdown; the uniform is the option's index and the first option is the default. The description follows the same rules as `@param`.
 - When you change what an effect or parameter does, update its description in the same edit.
 
 ## Other rules

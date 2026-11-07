@@ -1,5 +1,7 @@
 # Chain order. Effects not listed here run after these, alphabetically,
 # so add new effects above peripheral_emphasis to keep it last.
+# head_masks draws over people's heads first, so the other effects warp the masks too.
+head_masks.glsl
 breathing_drift.glsl
 pseudo_deepdream.glsl
 edge_mandala.glsl

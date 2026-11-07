@@ -55,8 +55,13 @@ Saving an effect file updates the page within about a second. Compile errors app
 | `vec2 u_gaze` | which way the head is turning, -1..1 per axis (+x right, +y up), settles back to 0 when the head rests |
 | `float eff_int` | intensity, 0..1 |
 | `vec2 u_res` | output size in pixels |
+| `vec4 u_heads[8]` | faces found in the image: `xy` = centre (uv), `z` = radius (half the face box, in units of the image height), `w` = 0..1 fade in/out |
+| `float u_headRoll[8]` | tilt of each face's eye line, radians (counter-clockwise) |
+| `int u_headCount` | number of valid entries in `u_heads` |
 
 `uv` runs 0..1 with (0,0) at the bottom-left. Files starting with `_` are ignored.
+
+Head tracking (`heads.js`) only runs while an enabled effect uses `u_heads`. The first time, it loads Google's MediaPipe face detector from the internet (a few MB). It finds faces toward the camera, and (via pose) people farther away or seen from the side. The stats line shows how many heads it sees and how long a detection takes. See `effects/head_masks.glsl` for an example.
 
 ### Effect parameters (sliders)
 
@@ -68,6 +73,12 @@ uniform float colorfulness; // @param -1 1 0 Grey dream at -1, original colours 
 ```
 
 Clicking the slider's name shows the description. The slider appears in the list behind your effect's **parameters** button and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
+
+For a dropdown instead of a slider, use `@choice` with the options separated by `|`. The uniform gets the index of the selected option (0, 1, 2, ...), and the first option is the default. In the shader, use `int(mask + 0.5)`:
+
+```glsl
+uniform float mask; // @choice pumpkin|skull|pig Which mask covers the faces.
+```
 
 ## Rules
 

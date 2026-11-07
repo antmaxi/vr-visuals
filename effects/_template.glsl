@@ -17,11 +17,16 @@
 //   vec2      u_gaze   head turn direction, -1..1 (+x right, +y up), recenters at rest
 //   float     eff_int  0..1 effect intensity
 //   vec2      u_res    output size in pixels
+//   vec4      u_heads[8], float u_headRoll[8], int u_headCount
+//                      faces in the image (see README); head tracking only runs
+//                      while an enabled effect uses u_heads
 //
 // Optional sliders in the panel: declare a float uniform with min, max, default
 // and a description (shown when you click the slider's name). Comment-only lines
 // directly below continue the description:
 //   uniform float my_amount; // @param 0 1 0.5 How strongly the image swirls.
+// A dropdown instead (the uniform is the option's index, the first is the default):
+//   uniform float my_style; // @choice waves|spirals Which pattern appears.
 //
 // Rules:
 // - eff_int = 0 must give output identical to the input, including any

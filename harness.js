@@ -216,6 +216,7 @@ function autoEffInt(current, dt, m) {
 // ============================================================================
 // Shaders
 // ============================================================================
+const MAX_HEADS = 8;
 const HEADER = `#version 300 es
 precision highp float;
 uniform sampler2D u_tex;
@@ -226,6 +227,9 @@ uniform vec2 u_look;
 uniform vec2 u_gaze;
 uniform float eff_int;
 uniform vec2 u_res;
+uniform vec4 u_heads[${MAX_HEADS}];
+uniform float u_headRoll[${MAX_HEADS}];
+uniform int u_headCount;
 `;
 const HEADER_LINES = HEADER.split('\n').length - 1;
 const FOOTER = `
@@ -397,10 +401,12 @@ function parseDescription(src) {
   return joinComment(lines);
 }
 
-// Per-effect sliders, declared in the effect file as:
+// Per-effect parameters, declared in the effect file as a slider:
 //   uniform float <name>; // @param <min> <max> <default> <description>
+// or as a dropdown (the uniform gets the option's index 0, 1, 2, ...; the first is the default):
+//   uniform float <name>; // @choice <option>|<option>|... <description>
 // Comment-only lines directly below continue the description.
-const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@param\b(.*)$/;
+const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@(param|choice)\b(.*)$/;
 
 function parseParams(name, src) {
   const out = [];
@@ -408,19 +414,33 @@ function parseParams(name, src) {
   lines.forEach((line, i) => {
     const m = line.match(PARAM_RE);
     if (!m) return;
-    const [min, max, def, ...words] = m[2].trim().split(/\s+/);
-    const [lo, hi, d] = [min, max, def].map(Number);
-    if (![lo, hi, d].every(Number.isFinite) || !(hi > lo)) {
-      console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default> <description>"`);
-      return;
+    let q;
+    if (m[2] === 'choice') {
+      const [opts = '', ...words] = m[3].trim().split(/\s+/);
+      const choices = opts.split('|').filter(Boolean);
+      if (choices.length < 2) {
+        console.warn(`[${name}] ignoring "@choice" for ${m[1]}: expected "@choice <option>|<option>|... <description>"`);
+        return;
+      }
+      q = { name: m[1], min: 0, max: choices.length - 1, def: 0, choices, words };
+    } else {
+      const [min, max, def, ...words] = m[3].trim().split(/\s+/);
+      const [lo, hi, d] = [min, max, def].map(Number);
+      if (![lo, hi, d].every(Number.isFinite) || !(hi > lo)) {
+        console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default> <description>"`);
+        return;
+      }
+      q = { name: m[1], min: lo, max: hi, def: clamp(d, lo, hi), words };
     }
-    const desc = [words.join(' ')];
+    const desc = [q.words.join(' ')];
+    delete q.words;
     for (let j = i + 1; j < lines.length; j++) {
       const c = lines[j].match(COMMENT_RE);
       if (!c) break;
       desc.push(c[1]);
     }
-    out.push({ name: m[1], min: lo, max: hi, def: clamp(d, lo, hi), desc: joinComment(desc) });
+    q.desc = joinComment(desc);
+    out.push(q);
   });
   return out;
 }
@@ -608,6 +628,7 @@ function renderPanel() {
 
 // One slider row for an effect parameter. Double-click the slider to reset to the default.
 function paramRow(q) {
+  if (q.choices) return choiceRow(q);
   const row = document.createElement('div');
   row.className = 'row param';
   const range = `${q.min} .. ${q.max}, default ${q.def} (double-click the slider to reset)`;
@@ -626,6 +647,24 @@ function paramRow(q) {
   slider.ondblclick = () => { q.value = q.def; slider.value = q.def; paramState.delete(q.key); show(); };
   show();
   row.append(name, slider, val);
+  return row;
+}
+
+// Dropdown row for an "@choice" parameter; the uniform gets the selected option's index.
+function choiceRow(q) {
+  const row = document.createElement('div');
+  row.className = 'row param';
+  const range = `options: ${q.choices.join(', ')}; default ${q.choices[0]}`;
+  const name = clickableName(q.name, () => toggleBubble(name,
+    q.desc || 'No description yet.',
+    q.desc ? range : range + '\nAdd one after the options on the @choice line.'));
+  const sel = document.createElement('select');
+  q.choices.forEach((c, i) => sel.add(new Option(c, i, false, i === Math.round(q.value))));
+  sel.onchange = () => {
+    q.value = Number(sel.value);
+    if (q.value === q.def) paramState.delete(q.key); else paramState.set(q.key, q.value);
+  };
+  row.append(name, sel);
   return row;
 }
 
@@ -722,7 +761,28 @@ function draw(p, fbo, inTex, prevTex, time) {
   gl.uniform1f(p.u.eff_int, effInt);
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
+  if (p.u['u_heads[0]']) {
+    gl.uniform4fv(p.u['u_heads[0]'], headData);
+    if (p.u['u_headRoll[0]']) gl.uniform1fv(p.u['u_headRoll[0]'], headRoll);
+    gl.uniform1i(p.u.u_headCount, headCount);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// Heads for the lane being rendered, in render-target coordinates (see heads.js):
+// u_heads[i] = (center uv, radius in uv height units, alpha 0..1), u_headRoll[i] = tilt in radians.
+const headData = new Float32Array(4 * MAX_HEADS);
+const headRoll = new Float32Array(MAX_HEADS);
+let headCount = 0;
+
+// tracks: from getHeads(), in video coordinates; (sx, sy): the source pass's cover-fit scale.
+function setHeads(tracks, sx, sy) {
+  headCount = Math.min(tracks.length, MAX_HEADS);
+  for (let i = 0; i < headCount; i++) {
+    const h = tracks[i];
+    headData.set([(h.x - 0.5) / sx + 0.5, (h.y - 0.5) / sy + 0.5, h.r / sy, h.alpha], 4 * i);
+    headRoll[i] = h.roll;
+  }
 }
 
 const startTime = performance.now();
@@ -790,7 +850,8 @@ setInterval(() => {
   stats.t0 = now; stats.cam0 = lanes.map((l) => l.frames.count); stats.renderFrames = 0;
   const cams = stereoOn ? `L ${fps[0].toFixed(0)} / R ${fps[1].toFixed(0)} fps` : `${fps[0].toFixed(0)} fps`;
   $('stats').textContent = video.videoWidth
-    ? `camera ${video.videoWidth}x${video.videoHeight} @ ${cams} · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps · stereo ${stereoInfo}`
+    ? `camera ${video.videoWidth}x${video.videoHeight} @ ${cams} · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps · stereo ${stereoInfo}` +
+      (headsInfo() ? ' · ' + headsInfo() : '')
     : '';
 }, 500);
 
@@ -843,9 +904,13 @@ function renderChain(time, lane = 0) {
 
   // Source pass: cover-fit into the first render target ((1,1) when the aspects match).
   const ca = rtW / rtH, va = src.videoWidth / src.videoHeight;
+  const sx = ca > va ? 1 : ca / va, sy = ca > va ? va / ca : 1;
   gl.useProgram(sourceProg.prog);
-  gl.uniform2f(sourceProg.u.u_scale, ca > va ? 1 : ca / va, ca > va ? va / ca : 1);
+  gl.uniform2f(sourceProg.u.u_scale, sx, sy);
   draw(sourceProg, sourceRT[lane].fbo, sourceTex[lane], null, time);
+
+  updateHeads(lane, src, performance.now());
+  setHeads(getHeads(lane), sx, sy);
 
   // Effect chain.
   let input = sourceRT[lane].tex;
