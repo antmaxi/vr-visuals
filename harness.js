@@ -320,6 +320,7 @@ function setTexParams() {
 const effects = new Map();
 const enabledState = new Map();  // remembers checkbox state across reloads
 const paramState = new Map();    // "file:uniform" -> slider value the user set (survives reloads)
+const openParams = new Set();    // effect names whose "parameters" list is expanded (survives reloads)
 let chain = [];                  // ordered list of effect objects
 let orderText = null;
 let rtW = 0, rtH = 0;
@@ -549,7 +550,24 @@ function renderPanel() {
       e.desc || 'No description yet.',
       e.desc ? 'effects/' + e.name : `Add one as a comment block at the very top of effects/${e.name}.`));
     li.append(cb, ' ', title);
-    if (!e.error) for (const q of e.params) li.append(paramRow(q));
+    if (!e.error && e.params.length) {
+      // "parameters" button next to the name: shows/hides this effect's sliders.
+      const box = document.createElement('div');
+      box.className = 'params';
+      box.hidden = !openParams.has(e.name);
+      for (const q of e.params) box.append(paramRow(q));
+      const btn = document.createElement('button');
+      btn.className = 'paramsBtn';
+      const label = () => { btn.textContent = `parameters (${e.params.length}) ${box.hidden ? '▸' : '▾'}`; };
+      btn.onclick = () => {
+        hideBubble();
+        box.hidden = !box.hidden;
+        if (box.hidden) openParams.delete(e.name); else openParams.add(e.name);
+        label();
+      };
+      label();
+      li.append(' ', btn, box);
+    }
     if (e.error) {
       const err = document.createElement('div');
       err.className = 'err';

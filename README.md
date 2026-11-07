@@ -35,7 +35,7 @@ If port 8000 is taken (`OSError: [Errno 98] Address already in use`, or the page
 
 Use `localhost` in the address, not your machine's IP: browsers only allow the webcam on `localhost` or HTTPS pages, and the server only listens on `localhost` anyway.
 
-If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (plus any sliders the effect declares), and the `eff_int` slider. Click an effect's or a slider's name to see its description. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
+If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (plus a **parameters** button next to it if the effect declares sliders; it opens or closes the list), and the `eff_int` slider. Click an effect's or a slider's name to see its description. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
 
 Saving an effect file updates the page within about a second. Compile errors appear next to the effect's name, with line numbers from your file; that effect is skipped and the rest keep running.
 
@@ -65,7 +65,7 @@ uniform float colorfulness; // @param -1 1 0 Grey dream at -1, original colours 
                             // with rainbow-tinted patterns at 1.
 ```
 
-Clicking the slider's name shows the description. The slider appears under your effect's checkbox and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
+Clicking the slider's name shows the description. The slider appears in the list behind your effect's **parameters** button and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
 
 ## Rules
 
