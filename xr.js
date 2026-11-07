@@ -10,8 +10,17 @@
 // current view. So the image stays put in the world between camera frames instead of
 // riding along with the head and jumping. Rotation only; fine for things more than ~1 m away.
 
-const CAM_HFOV_DEFAULT = 70;      // degrees; image size. Tune in VR with the right thumbstick
-const CAM_DELAY_DEFAULT = 60;     // ms from capture to presentation; tune with the thumbstick
+// Controls in VR:  left stick  forward/back = image size, left/right = camera delay
+//                  right stick = move the image (align it with the real passthrough)
+//                  click a stick = reset that stick's settings
+// While adjusting, a text display shows the values and (in AR mode) the image turns
+// half see-through so it can be lined up with the passthrough behind it.
+const CAM_HFOV_DEFAULT = 70;      // degrees; image size
+const CAM_DELAY_DEFAULT = 60;     // ms from capture to presentation
+const STICK_DEADZONE = 0.25;
+const ADJUST_SHOW_MS = 2500;      // keep the text display up this long after the last adjustment
+const INTRO_SHOW_MS = 6000;       // ... and this long after entering VR
+const ADJUST_ALPHA = 0.5;         // image opacity while adjusting (AR mode only)
 const HEAD_STILL = 8;             // deg/s head rotation counted as still
 const HEAD_MOVING = 45;           // deg/s counted as fully moving
 const MOVE_STILL = 0.08;          // m/s head movement counted as still
@@ -32,48 +41,127 @@ void main() {
 const PRESENT_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_tex;
+uniform float u_alpha;
 in vec2 v_uv;
 out vec4 o;
-void main() { o = vec4(texture(u_tex, v_uv).rgb, 1.0); }`;
+void main() { o = vec4(texture(u_tex, v_uv).rgb * u_alpha, u_alpha); }`;  // premultiplied
+
+// Text display: a head-locked rectangle (in view space at distance 1) showing a canvas.
+const HUD_VERT = `#version 300 es
+uniform mat4 u_proj;
+uniform vec4 u_rect;   // x0, y0, x1, y1
+out vec2 v_uv;
+void main() {
+  vec2 c[6] = vec2[6](vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(0, 1), vec2(1, 0), vec2(1, 1));
+  v_uv = c[gl_VertexID];
+  gl_Position = u_proj * vec4(mix(u_rect.xy, u_rect.zw, v_uv), -1.0, 1.0);
+}`;
+
+const HUD_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_tex;
+in vec2 v_uv;
+out vec4 o;
+void main() { vec4 c = texture(u_tex, v_uv); o = vec4(c.rgb * c.a, c.a); }`;
 
 const xrBox = $('xrBox'), xrBtn = $('xrBtn');
-let xrMode = null, xrRefSpace = null, presentProg = null, xrLast = 0;
+let xrMode = null, xrRefSpace = null, presentProg = null, hudProg = null, xrLast = 0;
 
-// ---- tunables: panel sliders outside VR, thumbstick inside ----
-function tunable(id, key, def, unit) {
+// ---- tunables: panel sliders outside VR, thumbsticks inside ----
+function tunable(id, key, def, unit, decimals = 0) {
   const slider = $(id), label = $(id + 'Val');
-  const t = { value: Number(loadPref(key)) || def };
+  const stored = loadPref(key);
+  const t = { value: stored !== null && stored !== '' && isFinite(stored) ? Number(stored) : def, def };
+  t.text = () => t.value.toFixed(decimals) + unit;
   t.set = (v) => {
     t.value = Math.min(Number(slider.max), Math.max(Number(slider.min), v));
     slider.value = t.value;
-    label.textContent = Math.round(t.value) + unit;
+    label.textContent = t.text();
   };
-  t.save = () => savePref(key, Math.round(t.value));
+  t.save = () => savePref(key, t.value.toFixed(decimals));
   slider.oninput = () => { t.set(Number(slider.value)); t.save(); };
   t.set(t.value);
   return t;
 }
 const camFov = tunable('camFov', 'camFov2', CAM_HFOV_DEFAULT, '°');
 const camDelay = tunable('camDelay', 'camDelay', CAM_DELAY_DEFAULT, ' ms');
+const camYaw = tunable('camYaw', 'camYaw', 0, '°', 1);       // + = image moved right
+const camPitch = tunable('camPitch', 'camPitch', 0, '°', 1);   // + = image moved up
 
-// Diagnostics, shown in the status line when leaving VR.
-const input = { sources: 0, gamepads: 0, maxStick: 0 };
+// Diagnostics: shown in the text display and in the status line when leaving VR.
+const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
+const clicked = { left: false, right: false };
+let lastAdjust = -1e9, enteredAt = 0;
 
-function readThumbstick(session, dt) {
+function readSticks(session, dt, now) {
   input.sources = Math.max(input.sources, session.inputSources.length);
   let pads = 0;
   for (const s of session.inputSources) {
-    const a = s.gamepad && s.gamepad.axes;
+    const g = s.gamepad, a = g && g.axes;
     if (!a || a.length < 2) continue;
     pads++;
+    const hand = s.handedness === 'left' ? 'left' : 'right';
+    input.raw[hand] = Array.from(a, (v) => v.toFixed(2)).join(' ');
     // "xr-standard" puts the thumbstick in axes 2/3 (0/1 = touchpad); use whichever pair moves.
     let x = a[0], y = a[1];
     if (a.length >= 4 && Math.hypot(a[2], a[3]) > Math.hypot(a[0], a[1])) { x = a[2]; y = a[3]; }
-    input.maxStick = Math.max(input.maxStick, Math.hypot(x, y));
-    if (Math.abs(y) > 0.2) camFov.set(camFov.value - y * 25 * dt);     // forward = bigger image
-    if (Math.abs(x) > 0.2) camDelay.set(camDelay.value + x * 60 * dt); // right = more delay
+    // Only the stronger direction counts: a sideways push always leaks a little forward/back.
+    if (Math.abs(x) >= Math.abs(y)) y = 0; else x = 0;
+    if (Math.abs(x) < STICK_DEADZONE) x = 0;
+    if (Math.abs(y) < STICK_DEADZONE) y = 0;
+    if (x || y) lastAdjust = now;
+    if (hand === 'left') {
+      camFov.set(camFov.value - y * 25 * dt);       // forward = bigger image
+      camDelay.set(camDelay.value + x * 60 * dt);   // right = more delay
+    } else {
+      camYaw.set(camYaw.value + x * 8 * dt);        // right = move right
+      camPitch.set(camPitch.value - y * 8 * dt);    // forward = move up
+    }
+    const click = !!(g.buttons[3] && g.buttons[3].pressed);   // thumbstick press
+    if (click && !clicked[hand]) {
+      lastAdjust = now;
+      if (hand === 'left') { camFov.set(camFov.def); camDelay.set(camDelay.def); }
+      else { camYaw.set(0); camPitch.set(0); }
+    }
+    clicked[hand] = click;
   }
   input.gamepads = Math.max(input.gamepads, pads);
+}
+
+// ---- text display ----
+const hudCanvas = document.createElement('canvas');
+hudCanvas.width = 1024; hudCanvas.height = 176;
+const hudCtx = hudCanvas.getContext('2d');
+let hudTex = null, hudText = '';
+
+function updateHud() {
+  const lines = [
+    `size ${camFov.text()}    delay ${camDelay.text()}    move  x ${camYaw.text()}  y ${camPitch.text()}`,
+    'LEFT stick: fwd/back = size, left/right = delay',
+    'RIGHT stick: move image to line up with the room.  Click a stick = reset',
+    `sticks  L[${input.raw.left}]  R[${input.raw.right}]`,
+  ];
+  const text = lines.join('\n');
+  if (text === hudText && hudTex) return;
+  hudText = text;
+  const c = hudCtx;
+  c.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+  c.fillStyle = 'rgba(0,0,0,0.7)';
+  c.fillRect(0, 0, hudCanvas.width, hudCanvas.height);
+  c.fillStyle = '#fff';
+  c.font = 'bold 36px sans-serif';
+  c.fillText(lines[0], 20, 46);
+  c.font = '28px sans-serif';
+  c.fillText(lines[1], 20, 88);
+  c.fillText(lines[2], 20, 124);
+  c.fillStyle = '#aaa';
+  c.font = '22px monospace';
+  c.fillText(lines[3], 20, 160);
+  if (!hudTex) { hudTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, hudTex); setTexParams(); }
+  gl.bindTexture(gl.TEXTURE_2D, hudTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, hudCanvas);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 }
 
 // ---- quaternions {x, y, z, w} ----
@@ -100,6 +188,12 @@ function qToMat3(q) {   // column-major
   ]);
 }
 const copyQ = (q) => ({ x: q.x, y: q.y, z: q.z, w: q.w });
+function qAxis(ax, ay, az, deg) {
+  const h = (deg * Math.PI) / 360, s = Math.sin(h);
+  return { x: ax * s, y: ay * s, z: az * s, w: Math.cos(h) };
+}
+// Alignment offset in head space: + yaw moves the image right, + pitch moves it up.
+const offsetQ = () => qMul(qAxis(0, 1, 0, -camYaw.value), qAxis(1, 0, 0, camPitch.value));
 
 // ---- head orientation history, to look up where the head pointed at capture time ----
 const history = [];   // { t, q }, oldest first, ~0.5 s
@@ -156,6 +250,7 @@ async function enterXR() {
   if (!getSourceElement() || xrSession) return;
   try {
     if (!presentProg) presentProg = linkProgram(PRESENT_FRAG, PRESENT_VERT);
+    if (!hudProg) hudProg = linkProgram(HUD_FRAG, HUD_VERT);
     await gl.makeXRCompatible();
     const session = await navigator.xr.requestSession(xrMode);
     session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
@@ -164,12 +259,13 @@ async function enterXR() {
       xrSession = null;
       lastPose = null; captureQ = null; history.length = 0;
       rotSpeed = moveSpeed = 0; xrLast = 0;
-      camFov.save(); camDelay.save();
-      setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}, ` +
-        `strongest stick push: ${input.maxStick.toFixed(2)}. Size ${Math.round(camFov.value)}°, delay ${Math.round(camDelay.value)} ms.`);
-      input.sources = input.gamepads = input.maxStick = 0;
+      for (const t of [camFov, camDelay, camYaw, camPitch]) t.save();
+      setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}. ` +
+        `Size ${camFov.text()}, delay ${camDelay.text()}, move x ${camYaw.text()} y ${camPitch.text()}.`);
+      input.sources = input.gamepads = 0;
     });
     xrSession = session;
+    enteredAt = performance.now();
     session.requestAnimationFrame(xrFrame);
   } catch (e) {
     xrSession = null;
@@ -192,7 +288,7 @@ function xrFrame(now, frame) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   if (!pose || !src) return;
 
-  readThumbstick(session, dt);
+  readSticks(session, dt, now);
   const m = headMotion(pose.transform, dt);
   if (autoBox.checked) effInt = autoEffInt(effInt, dt, m);
   updateCaptureOrientation(now, pose.transform.orientation);
@@ -203,20 +299,39 @@ function xrFrame(now, frame) {
   const out = renderChain((now - startTime) / 1000);
   if (!out) return;
 
+  const adjusting = now - lastAdjust < ADJUST_SHOW_MS;
+  const showHud = adjusting || performance.now() - enteredAt < INTRO_SHOW_MS;
+  if (showHud) updateHud();
+
   gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-  gl.useProgram(presentProg.prog);
-  bindTex(0, out);
-  gl.uniform1i(presentProg.u.u_tex, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied alpha
   const hx = Math.tan((camFov.value / 2) * Math.PI / 180);
-  gl.uniform2f(presentProg.u.u_half, hx, hx * src.videoHeight / src.videoWidth);
-  const capQ = captureQ || pose.transform.orientation;
+  const capQ = qMul(captureQ || pose.transform.orientation, offsetQ());
   for (const view of pose.views) {
     const vp = layer.getViewport(view);
     gl.viewport(vp.x, vp.y, vp.width, vp.height);
+
+    gl.useProgram(presentProg.prog);
+    bindTex(0, out);
+    gl.uniform1i(presentProg.u.u_tex, 0);
+    gl.uniform1f(presentProg.u.u_alpha, adjusting && xrMode === 'immersive-ar' ? ADJUST_ALPHA : 1);
+    gl.uniform2f(presentProg.u.u_half, hx, hx * src.videoHeight / src.videoWidth);
     gl.uniformMatrix4fv(presentProg.u.u_proj, false, view.projectionMatrix);
     gl.uniformMatrix3fv(presentProg.u.u_rot, false, qToMat3(qMul(qConj(view.transform.orientation), capQ)));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    if (showHud) {
+      gl.useProgram(hudProg.prog);
+      bindTex(0, hudTex);
+      gl.uniform1i(hudProg.u.u_tex, 0);
+      gl.uniformMatrix4fv(hudProg.u.u_proj, false, view.projectionMatrix);
+      const w2 = 0.36, h = (2 * w2 * hudCanvas.height) / hudCanvas.width, y0 = -0.42;
+      gl.uniform4f(hudProg.u.u_rect, -w2, y0, w2, y0 + h);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
   }
+  gl.disable(gl.BLEND);
 }
 
 initXR();

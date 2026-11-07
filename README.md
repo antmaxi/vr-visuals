@@ -56,10 +56,12 @@ The headset's cameras can only be used on a secure page, so open the **GitHub Pa
 1. Allow camera access: in the Quest Browser's settings/permissions, allow **Headset cameras** (otherwise only the avatar camera is offered).
 2. Tap **Webcam**, allow access, and pick the passthrough camera (e.g. "camera 1 ... facing back") in the dropdown that appears.
 3. Tap **Enter VR**. The processed camera image fills your view. Press the Meta/menu button to leave.
-4. Tune with the **right thumbstick** while inside:
-   - **up/down = image size**: adjust until objects look as big as they really are (hold your hand out and compare).
-   - **left/right = camera delay**: turn your head side to side; adjust until the image stays still in the room instead of lagging behind or running ahead.
-   The values are remembered and also shown as sliders in the panel.
+4. Line the image up with the room using the controller thumbsticks (tilt them; no buttons needed):
+   - **Left stick forward/back = image size**: adjust until objects look as big as they really are.
+   - **Right stick = move the image** up/down/left/right until it sits exactly over the real room.
+   - **Left stick left/right = camera delay**: turn your head side to side; adjust until the image stays still in the room instead of lagging behind or running ahead.
+   - **Click a stick** (press it down) to reset that stick's settings.
+   While you adjust, a text display shows the values and the image turns half see-through, so you can match it against the real passthrough behind it. The values are remembered and also shown as sliders in the panel.
 
 `eff_int` auto mode uses **head motion** in the headset (it drops when you turn your head, builds up when you hold still).
 
