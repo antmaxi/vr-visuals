@@ -15,6 +15,8 @@
 //                  hold a trigger + right stick = stereo trim (left/right = separation,
 //                                                 fwd/back = vertical mismatch)
 //                  click a stick = reset that stick's settings (with trigger: the stereo trim)
+//                  A or X button = stereo eye check: both eyes see only camera A (left lane),
+//                                  then only camera B (right lane), then back to normal
 // While adjusting, a text display shows the values and (in AR mode) the image turns
 // half see-through so it can be lined up with the passthrough behind it.
 const CAM_HFOV_DEFAULT = 70;      // degrees; image size
@@ -96,6 +98,8 @@ const camVert = tunable('camVert', 'camVert', 0, '°', 1);    // stereo: + = lef
 // Diagnostics: shown in the text display and in the status line when leaving VR.
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
 const clicked = { left: false, right: false };
+const pressedA = { left: false, right: false };
+let eyeCheck = 0;   // 0 = normal stereo, 1 = both eyes see lane 0 (camera A), 2 = lane 1 (camera B)
 const camFps = [0, 0], camFps0 = [0, 0];
 let camFpsT = performance.now();
 setInterval(() => {
@@ -143,6 +147,9 @@ function readSticks(session, dt, now) {
       else { camYaw.set(0); camPitch.set(0); }
     }
     clicked[hand] = click;
+    const btnA = !!(g.buttons[4] && g.buttons[4].pressed);     // A (right hand) / X (left hand)
+    if (btnA && !pressedA[hand]) { eyeCheck = (eyeCheck + 1) % 3; lastAdjust = now; }
+    pressedA[hand] = btnA;
   }
   input.gamepads = Math.max(input.gamepads, pads);
 }
@@ -160,7 +167,9 @@ function updateHud(problem = '') {
     'LEFT stick: fwd/back = size, left/right = delay',
     'RIGHT stick: move image to line up with the room.  Click a stick = reset',
     'Hold TRIGGER + right stick: stereo separation (left/right), vertical (fwd/back)',
-    `stereo ${stereoInfo}   separation ${camSep.text()}  vertical ${camVert.text()}`,
+    eyeCheck && stereoOn
+      ? `EYE CHECK: both eyes see camera ${eyeCheck === 1 ? 'A' : 'B'} = "${lanes[eyeCheck - 1].label}"  (A/X = next)`
+      : `stereo ${stereoInfo}   sep ${camSep.text()}  vert ${camVert.text()}   A/X = eye check`,
     `sticks  L[${input.raw.left}]  R[${input.raw.right}]   VR ${Math.round(xrPerf.fps)} fps  camera ${cams} fps  render ${rtW}x${rtH}`,
     problem,
   ];
@@ -373,7 +382,7 @@ function xrFrame(now, frame) {
   }
 
   // Text display: while adjusting, for a few seconds after entering, and whenever there is a problem.
-  const show = problem || now - lastAdjust < ADJUST_SHOW_MS || performance.now() - enteredAt < INTRO_SHOW_MS;
+  const show = problem || (eyeCheck && stereoOn) || now - lastAdjust < ADJUST_SHOW_MS || performance.now() - enteredAt < INTRO_SHOW_MS;
   if (show) {
     try { updateHud(problem); drawHud(pose, layer); } catch (e) { console.error(e); }
   }
@@ -399,9 +408,11 @@ function drawCamera(now, pose, layer, src) {
     const vp = layer.getViewport(view);
     gl.viewport(vp.x, vp.y, vp.width, vp.height);
     const eye = view.eye === 'left' ? -1 : view.eye === 'right' ? 1 : 0;
-    const lane = stereo && outs[1] && ((eye === 1) !== swap) ? 1 : 0;
+    const lane = !(stereo && outs[1]) ? 0
+      : eyeCheck ? eyeCheck - 1                // eye check: one camera for both eyes
+      : (eye === 1) !== swap ? 1 : 0;
     const laneSrc = getSourceElement(lane) || src;
-    const capQ = qMul(captureQ[lane] || pose.transform.orientation, offsetQ(stereo ? eye : 0));
+    const capQ = qMul(captureQ[lane] || pose.transform.orientation, offsetQ(stereo && !eyeCheck ? eye : 0));
 
     gl.useProgram(presentProg.prog);
     bindTex(0, outs[lane]);

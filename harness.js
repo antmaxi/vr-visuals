@@ -56,14 +56,17 @@ async function videoInputs() {
 }
 
 // Stereo: lane 0 = left camera, lane 1 = right camera. On the Quest the passthrough cameras
-// are labelled "camera 1 ..." (left) and "camera 2 ..." (right); otherwise use the current
-// camera plus the next one.
+// are "camera 1, facing back" and "camera 2, facing back" (older builds: "camera 2 1",
+// "camera 2 2"); the first one by name is assumed to be the left one. That is NOT verified:
+// use the eye check in VR (A/X button) and "swap eyes" if it is the other way round.
+// Without two back-facing cameras: the current camera plus the next one.
 async function startStereo() {
   stopStereo();
   if (!camStream) { stopStereo('off - start the webcam first'); return; }
   const cams = await videoInputs();
-  const byNum = (n) => cams.find((d) => new RegExp(`camera\\s*${n}\\b`, 'i').test(d.label));
-  let left = byNum(1), right = byNum(2);
+  const back = cams.filter((d) => /back/i.test(d.label))
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+  let [left, right] = back;
   const current = camStream.getVideoTracks()[0].getSettings().deviceId;
   if (left && right) {
     if (current !== left.deviceId) await useWebcam(left.deviceId, true);
@@ -79,7 +82,9 @@ async function startStereo() {
     lanes[1].video.srcObject = s;
     await lanes[1].video.play();
     stereoOn = true;
-    stereoInfo = `on (L: ${(left && left.label) || 'camera'}, R: ${right.label || 'camera'})`;
+    lanes[0].label = (left && left.label) || 'camera A';
+    lanes[1].label = right.label || 'camera B';
+    stereoInfo = `on (L: ${lanes[0].label}, R: ${lanes[1].label})`;
   } catch (e) {
     stopStereo('off - right camera failed: ' + e.message);
   }
