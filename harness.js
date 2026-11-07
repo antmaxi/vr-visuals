@@ -405,10 +405,14 @@ function parseDescription(src) {
 
 // Per-effect parameters, declared in the effect file as a slider:
 //   uniform float <name>; // @param <min> <max> <default> <description>
+// as a whole-number slider (steps of 1, e.g. a count):
+//   uniform float <name>; // @int <min> <max> <default> <description>
 // or as a dropdown (the uniform gets the option's index 0, 1, 2, ...; the first is the default):
 //   uniform float <name>; // @choice <option>|<option>|... <description>
+// A comment-only line below can show the parameter only for one value of another parameter:
+//   // @when <other parameter>=<option name, or number>
 // Comment-only lines directly below continue the description.
-const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@(param|choice)\b(.*)$/;
+const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@(param|choice|int)\b(.*)$/;
 
 function parseParams(name, src) {
   const out = [];
@@ -428,18 +432,22 @@ function parseParams(name, src) {
     } else {
       const [min, max, def, ...words] = m[3].trim().split(/\s+/);
       const [lo, hi, d] = [min, max, def].map(Number);
-      if (![lo, hi, d].every(Number.isFinite) || !(hi > lo)) {
-        console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default> <description>"`);
+      const whole = m[2] === 'int';
+      if (![lo, hi, d].every(Number.isFinite) || !(hi > lo) || (whole && ![lo, hi].every(Number.isInteger))) {
+        console.warn(`[${name}] ignoring "@${m[2]}" for ${m[1]}: expected "@${m[2]} <min> <max> <default> <description>"${whole ? ' with whole numbers as min and max' : ''}`);
         return;
       }
-      q = { name: m[1], min: lo, max: hi, def: clamp(d, lo, hi), words };
+      q = { name: m[1], min: lo, max: hi, def: clamp(whole ? Math.round(d) : d, lo, hi), words };
+      if (whole) q.int = true;
     }
     const desc = [q.words.join(' ')];
     delete q.words;
     for (let j = i + 1; j < lines.length; j++) {
       const c = lines[j].match(COMMENT_RE);
       if (!c) break;
-      desc.push(c[1]);
+      const w = c[1].match(/^@when\s+(\w+)\s*=\s*(\S+)\s*$/);
+      if (w) q.when = { name: w[1], value: w[2] };
+      else desc.push(c[1]);
     }
     q.desc = joinComment(desc);
     out.push(q);
@@ -601,10 +609,13 @@ function renderPanel() {
       const box = document.createElement('div');
       box.className = 'params';
       box.hidden = !openParams.has(e.name);
-      for (const q of e.params) box.append(paramRow(q));
       const btn = document.createElement('button');
       btn.className = 'paramsBtn';
-      const label = () => { btn.textContent = `parameters (${e.params.length}) ${box.hidden ? '▸' : '▾'}`; };
+      const shown = () => e.params.filter((q) => !q.row || q.row.style.display !== 'none').length;
+      const label = () => { btn.textContent = `parameters (${shown()}) ${box.hidden ? '▸' : '▾'}`; };
+      const refresh = () => { applyWhen(e.params); label(); };
+      for (const q of e.params) { q.changed = refresh; q.row = box.appendChild(paramRow(q)); }
+      applyWhen(e.params);
       btn.onclick = () => {
         hideBubble();
         box.hidden = !box.hidden;
@@ -628,6 +639,17 @@ function renderPanel() {
   ol.append(orderNote);
 }
 
+// Hide the parameters whose "@when <other>=<value>" doesn't hold right now.
+function applyWhen(params) {
+  for (const q of params) {
+    if (!q.when || !q.row) continue;
+    const other = params.find((o) => o.name === q.when.name);
+    let want = Number(q.when.value);
+    if (other && other.choices && !Number.isFinite(want)) want = other.choices.indexOf(q.when.value);
+    q.row.style.display = other && Math.round(other.value) === want ? '' : 'none';
+  }
+}
+
 // One slider row for an effect parameter. Double-click the slider to reset to the default.
 function paramRow(q) {
   if (q.choices) return choiceRow(q);
@@ -639,14 +661,14 @@ function paramRow(q) {
     q.desc ? range : range + '\nAdd one after the numbers on the @param line.'));
   const slider = document.createElement('input');
   slider.type = 'range';
-  slider.min = q.min; slider.max = q.max; slider.step = (q.max - q.min) / 1000;
+  slider.min = q.min; slider.max = q.max; slider.step = q.int ? 1 : (q.max - q.min) / 1000;
   slider.value = q.value;
   slider.title = range;
   const val = document.createElement('span');
   val.className = 'val';
-  const show = () => { val.textContent = q.value.toFixed(2); };
-  slider.oninput = () => { q.value = Number(slider.value); paramState.set(q.key, q.value); show(); };
-  slider.ondblclick = () => { q.value = q.def; slider.value = q.def; paramState.delete(q.key); show(); };
+  const show = () => { val.textContent = q.value.toFixed(q.int ? 0 : 2); };
+  slider.oninput = () => { q.value = Number(slider.value); paramState.set(q.key, q.value); show(); if (q.changed) q.changed(); };
+  slider.ondblclick = () => { q.value = q.def; slider.value = q.def; paramState.delete(q.key); show(); if (q.changed) q.changed(); };
   show();
   row.append(name, slider, val);
   return row;
@@ -665,6 +687,7 @@ function choiceRow(q) {
   sel.onchange = () => {
     q.value = Number(sel.value);
     if (q.value === q.def) paramState.delete(q.key); else paramState.set(q.key, q.value);
+    if (q.changed) q.changed();
   };
   row.append(name, sel);
   return row;

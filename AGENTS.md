@@ -16,6 +16,7 @@ Every effect and every effect parameter must have a description. The panel shows
 
   Say what the slider does at its low and high end, and mention anything non-obvious (e.g. a squared response, or settings that look bad when combined).
 - **Dropdown parameters:** `uniform float <name>; // @choice a|b|c <description>` gives a dropdown; the uniform is the option's index and the first option is the default. The description follows the same rules as `@param`.
+- **Whole-number and conditional parameters:** `@int <min> <max> <default> <description>` gives a slider in steps of 1. A comment line `// @when <other param>=<option or number>` directly below a parameter shows it only for that value of the other one (it isn't part of the description). Don't forget to say in the description when a parameter only matters for some setting.
 - When you change what an effect or parameter does, update its description in the same edit.
 
 ## Other rules

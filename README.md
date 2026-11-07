@@ -76,6 +76,8 @@ uniform float colorfulness; // @param -1 1 0 Grey dream at -1, original colours 
 
 Clicking the slider's name shows the description. The slider appears in the list behind your effect's **parameters** button and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
 
+For a slider that only takes whole numbers (a count), use `@int` instead of `@param`; min and max must be whole numbers. To show a parameter only for one setting of another, add a comment line directly below it, e.g. `// @when mask=multiply` (an option name for a `@choice`, or a number); that line is not part of the description.
+
 For a dropdown instead of a slider, use `@choice` with the options separated by `|`. The uniform gets the index of the selected option (0, 1, 2, ...), and the first option is the default. In the shader, use `int(mask + 0.5)`:
 
 ```glsl

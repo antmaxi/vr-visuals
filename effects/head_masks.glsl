@@ -39,10 +39,10 @@ uniform float detail; // @param 0 1 0.5 Shading and fine detail: ribs, shadows, 
 uniform float opaqueness; // @param 0 1 1 How solid the masks are at a given eff_int. At 1 the masks are
                           // solid from eff_int 0.1 up; at 0.7 from 0.37 up; at 0 the opacity equals eff_int
                           // (see-through at low intensity). They always vanish at eff_int 0.
-uniform float heads;  // @param 2 12 5 Only for the multiply mask: how many heads you see in total, the real one
-                      // plus the copies around it (5 = the real head and 4 copies). The more heads, the
-                      // smaller each copy, so the ring stays about the same size.
-                      // The copies' size and distance also follow "size".
+uniform float heads;  // @int 2 12 5 How many heads you see in total, the real one plus the copies around it
+                      // (5 = the real head and 4 copies). The more heads, the smaller each copy, so the
+                      // ring stays about the same size. The copies' size and distance also follow "size".
+                      // @when mask=multiply
 
 const vec3 LIGHT = vec3(-0.45, 0.55, 0.7);
 
@@ -466,7 +466,7 @@ vec4 pixelate(vec2 p, float aa) {
 // "multiply": the real head stays; copies of it (head and hair) circle around it, shrinking as
 // their number grows so they fit side by side. glow tints each copy differently, detail draws a
 // rim around it. Unlike the other masks it reaches beyond radius 1.2, see cloneReach().
-int cloneCount() { return int(clamp(floor(heads + 0.5), 2.0, 12.0)) - 1; }
+int cloneCount() { return int(clamp(floor(heads + 0.5), 2.0, 12.0)) - 1; }   // heads is a whole number already
 
 float cloneRadius(int n) {
     float s = sin(3.1416 / float(max(n, 2)));
