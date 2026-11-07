@@ -119,6 +119,7 @@ const edgeFade = tunable('edgeFade', 'edgeFade', 6, '°', 1);  // soft edge widt
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
 const clicked = { left: false, right: false };
 const pressedA = { left: false, right: false };
+let pressedB = false;            // B on the right controller (recording, record.js)
 let eyeCheck = 0;   // 0 = normal stereo, 1 = both eyes see lane 0 (camera A), 2 = lane 1 (camera B)
 const camFps = [0, 0], camFps0 = [0, 0];
 let camFpsT = performance.now();
@@ -180,6 +181,11 @@ function readSticks(session, dt, now) {
     const btnA = !!(g.buttons[4] && g.buttons[4].pressed);     // A (right hand) / X (left hand)
     if (btnA && !pressedA[hand]) { eyeCheck = (eyeCheck + 1) % 3; lastAdjust = now; }
     pressedA[hand] = btnA;
+    if (hand === 'right') {                                    // B: start / stop recording
+      const btnB = !!(g.buttons[5] && g.buttons[5].pressed);
+      if (btnB && !pressedB && typeof recToggle === 'function') recToggle();
+      pressedB = btnB;
+    }
   }
   input.gamepads = Math.max(input.gamepads, pads);
 }
@@ -201,7 +207,7 @@ function updateHud(problem = '') {
     `match distance ${matchDist.text()}   camera offset: side ${camSide.text()}  forward ${camFwd.text()}  up ${camUp.text()}`,
     eyeCheck && stereoOn
       ? `EYE CHECK: both eyes see camera ${eyeCheck === 1 ? 'A' : 'B'} = "${lanes[eyeCheck - 1].label}"  (A/X = next)`
-      : `stereo ${stereoInfo}   sep ${camSep.text()}  vert ${camVert.text()}   A/X = eye check`,
+      : `stereo ${stereoInfo}   sep ${camSep.text()}  vert ${camVert.text()}   A/X = eye check   B = record`,
     `VR ${Math.round(xrPerf.fps)} fps  frame ${xrPerf.ms.toFixed(1)} ms (worst ${xrPerf.worstMs.toFixed(0)})  camera ${cams} fps  render ${rtW}x${rtH}  sticks L[${input.raw.left}] R[${input.raw.right}]`,
     problem,
   ];
@@ -325,7 +331,7 @@ function updateCaptureOrientation(now, headQ) {
       seenFrames[i] = f.count;
       lastNewFrame[i] = now;
       captureQ[i] = poseAt(f.presentationTime - camDelay.value);
-    } else if (now - lastNewFrame[i] > 300) {      // no frame callbacks in VR: delay only
+    } else if (now - lastNewFrame[i] > CALLBACK_STALE_MS) {   // callbacks stopped (VR): delay only
       captureQ[i] = poseAt(now - camDelay.value);
     }
   });
@@ -372,6 +378,7 @@ async function enterXR() {
     xrRefSpace = await session.requestReferenceSpace('local');
     session.addEventListener('end', () => {
       xrSession = null;
+      if (typeof recOnXrEnd === 'function') recOnXrEnd();   // stop + save recordings (record.js)
       lastPose = null; captureQ.fill(null); history.length = 0; resetHead();
       rotSpeed = moveSpeed = 0; xrLast = 0;
       for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert, matchDist, camSide, camFwd, camUp]) t.save();
@@ -457,6 +464,9 @@ function xrFrameBody(now, frame, session) {
   if (show) {
     try { updateHud(problem); drawHud(pose, layer); } catch (e) { console.error(e); }
   }
+  if (typeof recDrawBadge === 'function') {
+    try { recDrawBadge(pose, layer); } catch (e) { console.error(e); }
+  }
 }
 
 function drawCamera(now, pose, layer, src) {
@@ -509,6 +519,8 @@ function drawCamera(now, pose, layer, src) {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
   gl.disable(gl.BLEND);
+  // Recording (record.js): the left-lane image, only while recording.
+  if (typeof recCaptureXR === 'function') recCaptureXR(outs[0]);
 }
 
 function drawHud(pose, layer) {

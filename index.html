@@ -70,6 +70,8 @@
   </div>
   <div id="status">Pick webcam or a video (or drop a video file on the page).</div>
   <div id="stats" class="note"></div>
+  <div class="row" title="Records the processed image (one eye in VR) and saves it to Downloads. In VR: B button."><button id="recBtn">Record</button> <span id="recStatus" class="note" style="margin:0"></span></div>
+  <ul id="recList" class="note" style="margin:0;padding-left:16px"></ul>
   <h3>eff_int</h3>
   <div class="row">
     <input id="effInt" type="range" min="0" max="1" step="0.001" value="0.6">
@@ -164,5 +166,6 @@
 <script src="heads.js?v=dev"></script>
 <script src="audio.js?v=dev"></script>
 <script src="xr.js?v=dev"></script>
+<script src="record.js?v=dev"></script>
 </body>
 </html>

@@ -19,11 +19,12 @@ if (!gl) document.body.innerHTML = '<p style="color:#fff;padding:20px">WebGL2 is
 function makeLane() {
   const v = document.createElement('video');
   v.muted = true; v.loop = true; v.playsInline = true;
-  const lane = { video: v, stream: null, frames: { count: 0, presentationTime: 0 } };
+  const lane = { video: v, stream: null, frames: { count: 0, presentationTime: 0, at: 0 } };
   if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
     const onFrame = (now, meta) => {
       lane.frames.count++;
       lane.frames.presentationTime = meta.presentationTime || now;
+      lane.frames.at = performance.now();   // when the callback ran (they can stop in VR)
       v.requestVideoFrameCallback(onFrame);
     };
     v.requestVideoFrameCallback(onFrame);
@@ -460,7 +461,8 @@ function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
 function loadEffect(name, src) {
   let e = effects.get(name);
   if (!e) {
-    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [[null, null], [null, null]], cur: [0, 0] };
+    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [[null, null], [null, null]], cur: [0, 0],
+          strength: loadStrength(name) };
     effects.set(name, e);
   }
   if (e.prog) gl.deleteProgram(e.prog);
@@ -603,7 +605,7 @@ function renderPanel() {
     const title = clickableName(e.name.replace(/\.glsl$/, ''), () => toggleBubble(title,
       e.desc || 'No description yet.',
       e.desc ? 'effects/' + e.name : `Add one as a comment block at the very top of effects/${e.name}.`));
-    li.append(cb, ' ', title);
+    li.append(cb, ' ', title, strengthRow(e));
     if (!e.error && e.params.length) {
       // "parameters" button next to the name: shows/hides this effect's sliders.
       const box = document.createElement('div');
@@ -637,6 +639,35 @@ function renderPanel() {
   orderNote.className = 'note';
   orderNote.textContent = orderText === null ? 'order: no order.txt (alphabetical)' : 'order: from order.txt, then alphabetical';
   ol.append(orderNote);
+}
+
+// Per-effect strength: multiplies the shared eff_int for this effect (0..2, default 1),
+// remembered per effect in this browser. Double-click the slider to reset to 1.
+function loadStrength(name) {
+  const v = Number(loadPref('strength:' + name));
+  return loadPref('strength:' + name) !== null && Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1;
+}
+
+function strengthRow(e) {
+  const row = document.createElement('div');
+  row.className = 'row param';
+  const name = document.createElement('span');
+  name.textContent = 'strength';
+  name.title = 'This effect gets eff_int x strength (capped at 1). 0 = off, 1 = normal, 2 = full strength at half eff_int.';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = 0; slider.max = 2; slider.step = 0.01;
+  slider.value = e.strength;
+  slider.title = '0 .. 2, default 1 (double-click to reset)';
+  const val = document.createElement('span');
+  val.className = 'val';
+  const show = () => { val.textContent = e.strength.toFixed(2); };
+  const set = (v) => { e.strength = v; savePref('strength:' + e.name, v); show(); };
+  slider.oninput = () => set(Number(slider.value));
+  slider.ondblclick = () => { slider.value = 1; set(1); };
+  show();
+  row.append(name, slider, val);
+  return row;
 }
 
 // Hide the parameters whose "@when <other>=<value>" doesn't hold right now.
@@ -786,6 +817,7 @@ let sourceProg, copyProg;
 const sourceTex = [null, null];   // per lane: uploaded camera frame
 const uploadedFrame = [-1, -1];   // per lane: camera frame count at the last upload
 const uploadedSrc = [null, null];
+const CALLBACK_STALE_MS = 100;    // no new-frame callback for this long: upload every frame
 const sourceRT = [null, null];    // per lane: cover-fitted input to the chain
 
 function initGL() {
@@ -849,7 +881,9 @@ function draw(p, fbo, inTex, prevTex, time) {
   gl.uniform2f(p.u.u_gaze, headGaze[0], headGaze[1]);
   gl.uniform2f(p.u.u_focus, focus.pos[0], focus.pos[1]);
   gl.uniform2f(p.u.u_focusVel, focus.vel[0], focus.vel[1]);
-  gl.uniform1f(p.u.eff_int, effInt);
+  // Per-effect strength (0..2) scales the shared eff_int; clamped so effects still get 0..1,
+  // and eff_int = 0 stays 0 whatever the strength.
+  gl.uniform1f(p.u.eff_int, Math.min(1, effInt * (p.strength === undefined ? 1 : p.strength)));
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
   if (p.u['u_heads[0]']) {
@@ -1071,6 +1105,7 @@ function frame(now) {
     return;
   }
   draw(copyProg, null, out, null, 0);
+  if (typeof recCaptureFlat === 'function') recCaptureFlat();   // recording (record.js)
 }
 
 // Upload the lane's current frame and run the effect chain into that lane's render targets
@@ -1091,9 +1126,11 @@ function renderChain(time, lane = 0) {
   // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy). Only when the camera
   // delivered a new frame: the display runs at 72-90 fps, the camera at ~30, and re-uploading
   // the same 1280x960 picture (twice in stereo) is a big part of the frame time on the headset.
-  // (Without frame callbacks the count stays 0: then upload every frame.)
-  const fc = lanes[lane].frames.count;
-  if (!fc || fc !== uploadedFrame[lane] || src !== uploadedSrc[lane]) {
+  // If the callbacks stop (no frame callbacks at all, or the headset pauses them inside VR),
+  // upload every frame instead, or the picture would freeze between rare callbacks.
+  const fr = lanes[lane].frames, fc = fr.count;
+  const callbacksStale = !fc || performance.now() - fr.at > CALLBACK_STALE_MS;
+  if (callbacksStale || fc !== uploadedFrame[lane] || src !== uploadedSrc[lane]) {
     uploadedFrame[lane] = fc;
     uploadedSrc[lane] = src;
     bindTex(0, sourceTex[lane]);

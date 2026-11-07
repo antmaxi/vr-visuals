@@ -37,7 +37,7 @@ If port 8000 is taken (`OSError: [Errno 98] Address already in use`, or the page
 
 Use `localhost` in the address, not your machine's IP: browsers only allow the webcam on `localhost` or HTTPS pages, and the server only listens on `localhost` anyway.
 
-If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (all unticked when the page loads: tick the ones you want) (plus a **parameters** button next to it if the effect declares sliders; it opens or closes the list), and the `eff_int` slider. Click an effect's or a slider's name to see its description. **auto** makes `eff_int` build up slowly while the image is still (in the headset: while your head is still) and drop when it moves; **drop time** sets how fast it falls and **drop depth** how far (default 0.8 = a full effect sinks to 0.2 at most). Double-click either slider to reset it. Press **H** to hide the panel.
+If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (all unticked when the page loads: tick the ones you want), a **strength** slider per effect (0 to 2, default 1: that effect gets `eff_int` × strength, capped at 1, so you can balance effects against each other; remembered in this browser, double-click to reset) (plus a **parameters** button next to it if the effect declares sliders; it opens or closes the list), and the `eff_int` slider. Click an effect's or a slider's name to see its description. **auto** makes `eff_int` build up slowly while the image is still (in the headset: while your head is still) and drop when it moves; **drop time** sets how fast it falls and **drop depth** how far (default 0.8 = a full effect sinks to 0.2 at most). Double-click either slider to reset it. Press **H** to hide the panel.
 
 **Soundtrack:** put files in `audio/bed/`, `audio/intense/`, `audio/head_appear/`, `audio/head_disappear/` (git-ignored) and press **Play**. The looping bed comes from `bed/`; names containing `more-intense` crossfade in as `eff_int` rises. `peak/` (a `*loop*` and an `*onset*` file) kicks in after `eff_int` stays high (0.85+) for 5 s and fades out when it falls below 0.7; `intense/` one-shots fire when `eff_int` crosses up a level band (or drops fast); head folders fire when faces appear or leave. Variants that share the same name before `#` are picked at random. Bed gain and a low-pass still follow `eff_int`. **volume** and **react** control loudness and how hard the bed tracks intensity.
 
@@ -141,6 +141,12 @@ The headset's cameras can only be used on a secure page, so open the **GitHub Pa
 The panel shows the camera resolution and frame rate, and the render frame rate. Check these first if something looks jerky.
 
 Known limits for now: without stereo, one camera is shown to both eyes (no depth). The image is turned to stay put in the room between camera frames, but only for rotation, so nearby things can still shift a little when you move your head sideways. On a fast turn you briefly see the edge of the image. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
+
+## Recording
+
+Press **B** (right controller) in VR, or **Record** in the panel, to start recording; press it again to stop. It records the **processed image** (in the headset: the left eye, with effects) as an MP4 (or WebM) into the device's **Downloads**. Clips made inside VR are saved when you leave VR (browsers don't download inside VR); the panel also lists this visit's clips with a **Save** link in case a download was blocked. A red **REC** badge shows at the top of the view while recording.
+
+The real passthrough around the image is not in the recording (web pages can't see it); for the full view as you see it, use the Quest's own recorder (Meta button, Camera, Record video). Recording costs some headset performance and about 1 MB per second, so keep clips short. To get a clip off the Quest: USB cable (Quest folder Download/) or the Meta Horizon app.
 
 ## Hosted version
 
