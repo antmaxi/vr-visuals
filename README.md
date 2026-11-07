@@ -52,6 +52,8 @@ Saving an effect file updates the page within about a second. Compile errors app
 | `float u_time` | seconds |
 | `float u_dt` | seconds since the previous frame (use it to make feedback frame-rate independent) |
 | `vec2 u_look` | how far the scene has shifted across the image because the head turned, in uv units. Sample a pattern at `uv - u_look` to keep it attached to the scene. Flat page: drag on the video to simulate. |
+| `vec2 u_focus` | uv of the main object in view (biggest / closest-looking, moving things favored), eases after it on a smooth spring (~1 s). Heuristic, no depth camera. |
+| `vec2 u_focusVel` | velocity of `u_focus` in uv per second (0 when it rests). Use it to let things trail behind the moving focus. |
 | `vec2 u_gaze` | which way the head is turning, -1..1 per axis (+x right, +y up), settles back to 0 when the head rests |
 | `float eff_int` | intensity, 0..1 |
 | `vec2 u_res` | output size in pixels |

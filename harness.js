@@ -225,6 +225,8 @@ uniform float u_time;
 uniform float u_dt;
 uniform vec2 u_look;
 uniform vec2 u_gaze;
+uniform vec2 u_focus;
+uniform vec2 u_focusVel;
 uniform float eff_int;
 uniform vec2 u_res;
 uniform vec4 u_heads[${MAX_HEADS}];
@@ -758,6 +760,8 @@ function draw(p, fbo, inTex, prevTex, time) {
   gl.uniform1f(p.u.u_dt, frameDt);
   gl.uniform2f(p.u.u_look, headLook[0], headLook[1]);
   gl.uniform2f(p.u.u_gaze, headGaze[0], headGaze[1]);
+  gl.uniform2f(p.u.u_focus, focus.pos[0], focus.pos[1]);
+  gl.uniform2f(p.u.u_focusVel, focus.vel[0], focus.vel[1]);
   gl.uniform1f(p.u.eff_int, effInt);
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
@@ -823,6 +827,98 @@ function updateHead(yaw, pitch, hfovDeg, dt) {
   const c = (v) => Math.max(-1, Math.min(1, v));
   headGaze = [c((s.accYaw - s.refYaw) / r), c((pitch - s.refPitch) / r)];
 }
+// ============================================================================
+// Main object in view (u_focus): uv of the biggest / closest-looking object,
+// smoothed so it glides after it as things move. No depth camera, so this is a
+// heuristic on a tiny copy of the frame: every pixel is scored by how different
+// its color is from the background (the frame border's average), its local
+// contrast and its motion; the connected region with the largest total score
+// wins (big + distinct + moving ~ close to the camera). Its weighted center is
+// the target. Runs at FOCUS_HZ on lane 0 only (both eyes share it).
+// ============================================================================
+const FOCUS_W = 48, FOCUS_H = 27;
+const FOCUS_HZ = 20;           // analyses per second
+const FOCUS_TARGET_SMOOTH = 0.3;    // s, low-pass on the detected target (detection is jumpy)
+const FOCUS_DEADZONE = 0.02;   // uv; target moves smaller than this are ignored (no wobble)
+const FOCUS_SETTLE = 0.45;     // s, time scale of the critically damped spring that moves u_focus
+const focusCanvas = document.createElement('canvas');
+focusCanvas.width = FOCUS_W; focusCanvas.height = FOCUS_H;
+const focusCtx = focusCanvas.getContext('2d', { willReadFrequently: true });
+const focus = { pos: [0.5, 0.5], vel: [0, 0], target: [0.5, 0.5], goal: [0.5, 0.5], prevL: null, last: -1 };
+
+function findFocusTarget(src) {
+  focusCtx.drawImage(src, 0, 0, FOCUS_W, FOCUS_H);
+  const px = focusCtx.getImageData(0, 0, FOCUS_W, FOCUS_H).data;
+  const n = FOCUS_W * FOCUS_H, L = new Float32Array(n), S = new Float32Array(n);
+  // background estimate = average color of the border pixels
+  let br = 0, bg = 0, bb = 0, bc = 0;
+  for (let y = 0; y < FOCUS_H; y++) for (let x = 0; x < FOCUS_W; x++) {
+    const i = y * FOCUS_W + x, o = 4 * i;
+    L[i] = (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) / 255;
+    if (x === 0 || y === 0 || x === FOCUS_W - 1 || y === FOCUS_H - 1) {
+      br += px[o]; bg += px[o + 1]; bb += px[o + 2]; bc++;
+    }
+  }
+  br /= bc; bg /= bc; bb /= bc;
+  let mean = 0;
+  for (let y = 0; y < FOCUS_H; y++) for (let x = 0; x < FOCUS_W; x++) {
+    const i = y * FOCUS_W + x, o = 4 * i;
+    const dc = Math.hypot(px[o] - br, px[o + 1] - bg, px[o + 2] - bb) / 255;
+    const gx = L[y * FOCUS_W + Math.min(x + 1, FOCUS_W - 1)] - L[y * FOCUS_W + Math.max(x - 1, 0)];
+    const gy = L[Math.min(y + 1, FOCUS_H - 1) * FOCUS_W + x] - L[Math.max(y - 1, 0) * FOCUS_W + x];
+    const mo = focus.prevL ? Math.abs(L[i] - focus.prevL[i]) : 0;
+    S[i] = dc + 0.5 * Math.hypot(gx, gy) + 2.0 * mo;
+    mean += S[i];
+  }
+  focus.prevL = L;
+  mean /= n;
+  let vr = 0;
+  for (let i = 0; i < n; i++) vr += (S[i] - mean) * (S[i] - mean);
+  const thr = Math.max(0.12, mean + 0.5 * Math.sqrt(vr / n));
+  // connected regions above the threshold; keep the one with the largest total score
+  const seen = new Uint8Array(n), stack = new Int32Array(n);
+  let best = 0, bx = 0.5, by = 0.5;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (seen[s0] || S[s0] < thr) continue;
+    let top = 0, sum = 0, sx = 0, sy = 0;
+    stack[top++] = s0; seen[s0] = 1;
+    while (top) {
+      const i = stack[--top], x = i % FOCUS_W, y = (i - x) / FOCUS_W, w = S[i];
+      sum += w; sx += w * (x + 0.5); sy += w * (y + 0.5);
+      if (x > 0 && !seen[i - 1] && S[i - 1] >= thr) { seen[i - 1] = 1; stack[top++] = i - 1; }
+      if (x < FOCUS_W - 1 && !seen[i + 1] && S[i + 1] >= thr) { seen[i + 1] = 1; stack[top++] = i + 1; }
+      if (y > 0 && !seen[i - FOCUS_W] && S[i - FOCUS_W] >= thr) { seen[i - FOCUS_W] = 1; stack[top++] = i - FOCUS_W; }
+      if (y < FOCUS_H - 1 && !seen[i + FOCUS_W] && S[i + FOCUS_W] >= thr) { seen[i + FOCUS_W] = 1; stack[top++] = i + FOCUS_W; }
+    }
+    if (sum > best) { best = sum; bx = sx / sum / FOCUS_W; by = 1 - sy / sum / FOCUS_H; }   // uv: y up
+  }
+  return [bx, by];
+}
+
+function updateFocus(src, time, dt) {
+  if (time - focus.last >= 1 / FOCUS_HZ || focus.last < 0 || time < focus.last) {
+    focus.last = time;
+    try { focus.target = findFocusTarget(src); } catch (e) { /* e.g. frame not ready: keep target */ }
+  }
+  if (dt <= 0) return;
+  // 1) smooth the jumpy detection into a goal, ignoring tiny changes
+  const kt = 1 - Math.exp(-dt / FOCUS_TARGET_SMOOTH);
+  if (Math.hypot(focus.target[0] - focus.goal[0], focus.target[1] - focus.goal[1]) > FOCUS_DEADZONE) {
+    focus.goal[0] += (focus.target[0] - focus.goal[0]) * kt;
+    focus.goal[1] += (focus.target[1] - focus.goal[1]) * kt;
+  }
+  // 2) critically damped spring toward the goal: eases in and out, never overshoots.
+  //    Sub-stepped so it stays stable at any frame rate.
+  const w = 1 / FOCUS_SETTLE, steps = Math.ceil(dt / 0.01), h = dt / steps;
+  for (let s = 0; s < steps; s++) {
+    for (let a = 0; a < 2; a++) {
+      const acc = w * w * (focus.goal[a] - focus.pos[a]) - 2 * w * focus.vel[a];
+      focus.vel[a] += acc * h;
+      focus.pos[a] += focus.vel[a] * h;
+    }
+  }
+}
+
 function resetHead() { headState.yaw = null; headLook = [0, 0]; headGaze = [0, 0]; }
 
 canvas.addEventListener('pointerdown', (ev) => { simHead.active = true; simPointer(ev); });
@@ -894,6 +990,7 @@ function renderChain(time, lane = 0) {
   }
   const src = getSourceElement(lane);
   if (!src) return null;
+  if (lane === 0) updateFocus(src, time, frameDt);
   if (!sourceRT[lane]) sourceRT[lane] = makeTarget(rtW, rtH);
 
   // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy).
