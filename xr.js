@@ -108,7 +108,8 @@ let lastAdjust = -1e9, enteredAt = 0;
 function readSticks(session, dt, now) {
   input.sources = Math.max(input.sources, session.inputSources.length);
   // Holding either trigger switches the right stick to the stereo trim.
-  const trim = session.inputSources.some((s) => s.gamepad && s.gamepad.buttons[0] && s.gamepad.buttons[0].value > 0.5);
+  // (inputSources is an XRInputSourceArray: iterable, but not a real Array, so no .some())
+  const trim = Array.from(session.inputSources).some((s) => s.gamepad && s.gamepad.buttons[0] && s.gamepad.buttons[0].value > 0.5);
   let pads = 0;
   for (const s of session.inputSources) {
     const g = s.gamepad, a = g && g.axes;
