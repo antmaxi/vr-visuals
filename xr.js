@@ -56,14 +56,24 @@ function tunable(id, key, def, unit) {
 const camFov = tunable('camFov', 'camFov2', CAM_HFOV_DEFAULT, '°');
 const camDelay = tunable('camDelay', 'camDelay', CAM_DELAY_DEFAULT, ' ms');
 
+// Diagnostics, shown in the status line when leaving VR.
+const input = { sources: 0, gamepads: 0, maxStick: 0 };
+
 function readThumbstick(session, dt) {
+  input.sources = Math.max(input.sources, session.inputSources.length);
+  let pads = 0;
   for (const s of session.inputSources) {
     const a = s.gamepad && s.gamepad.axes;
     if (!a || a.length < 2) continue;
-    const x = a.length >= 4 ? a[2] : a[0], y = a.length >= 4 ? a[3] : a[1];
-    if (Math.abs(y) > 0.2) camFov.set(camFov.value - y * 25 * dt);     // up = bigger image
+    pads++;
+    // "xr-standard" puts the thumbstick in axes 2/3 (0/1 = touchpad); use whichever pair moves.
+    let x = a[0], y = a[1];
+    if (a.length >= 4 && Math.hypot(a[2], a[3]) > Math.hypot(a[0], a[1])) { x = a[2]; y = a[3]; }
+    input.maxStick = Math.max(input.maxStick, Math.hypot(x, y));
+    if (Math.abs(y) > 0.2) camFov.set(camFov.value - y * 25 * dt);     // forward = bigger image
     if (Math.abs(x) > 0.2) camDelay.set(camDelay.value + x * 60 * dt); // right = more delay
   }
+  input.gamepads = Math.max(input.gamepads, pads);
 }
 
 // ---- quaternions {x, y, z, w} ----
@@ -155,7 +165,9 @@ async function enterXR() {
       lastPose = null; captureQ = null; history.length = 0;
       rotSpeed = moveSpeed = 0; xrLast = 0;
       camFov.save(); camDelay.save();
-      setStatus('Left headset mode');
+      setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}, ` +
+        `strongest stick push: ${input.maxStick.toFixed(2)}. Size ${Math.round(camFov.value)}°, delay ${Math.round(camDelay.value)} ms.`);
+      input.sources = input.gamepads = input.maxStick = 0;
     });
     xrSession = session;
     session.requestAnimationFrame(xrFrame);
