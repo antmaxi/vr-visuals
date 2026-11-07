@@ -4,11 +4,36 @@ Real-time video effects written as GLSL shaders, chained together. Plain HTML + 
 
 ## Run it
 
+You need **git**, **Python 3.7 or newer** (standard library only, nothing to `pip install`) and a browser with WebGL2 (current Chrome, Firefox, Edge or Safari).
+
+Check what you have:
+
 ```
-python3 serve.py
+git --version
+python3 --version      # Windows: python --version  (or: py --version)
 ```
 
-Open http://localhost:8000, click **Webcam** or pick / drop a video file (put your test videos in `videos/`; they are not committed).
+If one is missing, install it:
+
+| OS | git | Python |
+|---|---|---|
+| Ubuntu / Debian | `sudo apt install git` | `sudo apt install python3` |
+| macOS | `xcode-select --install` | `brew install python` (or from python.org) |
+| Windows | [git-scm.com](https://git-scm.com/download/win) | [python.org](https://www.python.org/downloads/) (tick "Add python.exe to PATH") |
+
+Get the code and start the server:
+
+```
+git clone https://github.com/bastak/vr-visuals
+cd vr-visuals
+python3 serve.py       # Windows: python serve.py  (or: py serve.py)
+```
+
+Open http://localhost:8000, click **Webcam** (allow camera access when the browser asks) or pick / drop a video file (put your test videos in `videos/`; they are not committed). Stop the server with Ctrl+C.
+
+If port 8000 is taken (`OSError: [Errno 98] Address already in use`, or the page asks for a password / shows something else), use another port: `python3 serve.py --port 8001`, then open http://localhost:8001.
+
+Use `localhost` in the address, not your machine's IP: browsers only allow the webcam on `localhost` or HTTPS pages, and the server only listens on `localhost` anyway.
 
 If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect, and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
 
