@@ -141,6 +141,7 @@ precision highp float;
 uniform sampler2D u_tex;
 uniform sampler2D u_prev;
 uniform float u_time;
+uniform float u_dt;
 uniform float eff_int;
 uniform vec2 u_res;
 `;
@@ -524,6 +525,7 @@ function draw(p, fbo, inTex, prevTex, time) {
   bindTex(0, inTex); gl.uniform1i(p.u.u_tex, 0);
   if (p.u.u_prev) { bindTex(1, prevTex); gl.uniform1i(p.u.u_prev, 1); }
   gl.uniform1f(p.u.u_time, time);
+  gl.uniform1f(p.u.u_dt, frameDt);
   gl.uniform1f(p.u.eff_int, effInt);
   gl.uniform2f(p.u.u_res, rtW, rtH);
   if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
@@ -533,6 +535,8 @@ function draw(p, fbo, inTex, prevTex, time) {
 const startTime = performance.now();
 let lastNow = startTime;
 let xrSession = null;   // set by xr.js while the headset mode is active
+let frameDt = 0;               // seconds since the previous chain render (clamped), for u_dt
+let lastChainTime = null;
 
 function showEffInt() {
   if (autoBox.checked) effIntSlider.value = effInt;
@@ -576,6 +580,8 @@ function frame(now) {
 // Upload the current source frame and run the effect chain into the render targets.
 // Returns the final texture, or null when there is no source yet.
 function renderChain(time) {
+  frameDt = lastChainTime === null ? 0 : Math.min(0.1, Math.max(0, time - lastChainTime));
+  lastChainTime = time;
   const src = getSourceElement();
   if (!src) return null;
 

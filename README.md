@@ -49,6 +49,7 @@ Saving an effect file updates the page within about a second. Compile errors app
 | `sampler2D u_tex` | previous effect's output (or the video frame) |
 | `sampler2D u_prev` | this effect's own output from the last frame (for feedback) |
 | `float u_time` | seconds |
+| `float u_dt` | seconds since the previous frame (use it to make feedback frame-rate independent) |
 | `float eff_int` | intensity, 0..1 |
 | `vec2 u_res` | output size in pixels |
 

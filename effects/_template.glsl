@@ -7,6 +7,7 @@
 //   sampler2D u_tex    previous effect's output (or the video frame)
 //   sampler2D u_prev   this effect's own output from the last frame (feedback)
 //   float     u_time   seconds
+//   float     u_dt     seconds since the previous frame (max 0.1)
 //   float     eff_int  0..1 effect intensity
 //   vec2      u_res    output size in pixels
 //
