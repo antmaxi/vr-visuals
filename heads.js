@@ -57,7 +57,7 @@ const MERGE_DIST = 0.8;       // two tracks closer than this many radii are the 
 const MAX_ROLL = 0.8;         // rad
 
 let headDetector = null, poseLandmarker = null;
-let headState = 'off';        // off | loading | ready | failed
+let detectorState = 'off';        // off | loading | ready | failed
 let headError = '';
 let headDelegate = '';
 let detectMs = 0, callGapMs = 0, lastCallAt = 0, nextCallAt = 0, nextLane = 0;
@@ -86,7 +86,7 @@ function headsWanted() {
 }
 
 async function loadHeadDetector(delegate = 'GPU') {
-  headState = 'loading';
+  detectorState = 'loading';
   try {
     const { FilesetResolver, FaceDetector, PoseLandmarker } = await import(MP_URL + '/vision_bundle.mjs');
     const fileset = await FilesetResolver.forVisionTasks(MP_URL + '/wasm');
@@ -102,7 +102,7 @@ async function loadHeadDetector(delegate = 'GPU') {
       headDetector = await make('CPU');
       headDelegate = 'CPU';
     }
-    headState = 'ready';
+    detectorState = 'ready';
     PoseLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: POSE_MODEL, delegate: headDelegate },
       runningMode: 'IMAGE', numPoses: 4, minPoseDetectionConfidence: 0.5,
@@ -111,7 +111,7 @@ async function loadHeadDetector(delegate = 'GPU') {
     });
   } catch (e) {
     console.error('Face detector failed to load:', e);
-    headState = 'failed';
+    detectorState = 'failed';
     headError = e.message || String(e);
   }
 }
@@ -366,7 +366,7 @@ function updateHeads(lane, src, now) {
     prevShift[0] = prevShift[1] = null;
     return;
   }
-  if (headState === 'off') loadHeadDetector();
+  if (detectorState === 'off') loadHeadDetector();
   const dt = headLastStep[lane] ? Math.min(0.1, (now - headLastStep[lane]) / 1000) : 0;
   headLastStep[lane] = now;
   const tracks = headTracks[lane];
@@ -376,7 +376,7 @@ function updateHeads(lane, src, now) {
   if (laneFresh[lane] && !xrSession) followImage(lane, tracks, src);
 
   const fresh = laneFresh[lane] || now - laneFrameAt[lane] > NO_CALLBACKS_MS;
-  if (headState === 'ready' && fresh && now >= nextCallAt && (lane === nextLane || !stereoOn)) {
+  if (detectorState === 'ready' && fresh && now >= nextCallAt && (lane === nextLane || !stereoOn)) {
     laneFresh[lane] = false;
     nextLane = stereoOn ? 1 - lane : 0;
     try {
@@ -385,7 +385,7 @@ function updateHeads(lane, src, now) {
       console.error('Face detection failed:', e);
       headDetector = null;
       if (headDelegate === 'GPU') loadHeadDetector('CPU');
-      else { headState = 'failed'; headError = e.message || String(e); }
+      else { detectorState = 'failed'; headError = e.message || String(e); }
     }
     const end = performance.now();
     nextCallAt = end + Math.max(MIN_GAP_MS, (end - now) * (1 - BUSY_FRACTION) / BUSY_FRACTION);
@@ -404,9 +404,9 @@ function getHeads(lane) {
 
 // Short status for the stats line ('' while no effect uses heads).
 function headsInfo() {
-  if (headState === 'off' || !headsWanted()) return '';
-  if (headState === 'loading') return 'heads: loading face detector';
-  if (headState === 'failed') return 'heads: detector failed - ' + headError;
+  if (detectorState === 'off' || !headsWanted()) return '';
+  if (detectorState === 'loading') return 'heads: loading face detector';
+  if (detectorState === 'failed') return 'heads: detector failed - ' + headError;
   const rate = callGapMs > 0 ? (1000 / callGapMs).toFixed(0) : '-';
   return `heads ${getHeads(0).length} (detect ${detectMs.toFixed(0)} ms, ${rate}/s, ${headDelegate}${poseLandmarker ? '+pose' : ''})`;
 }
