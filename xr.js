@@ -12,7 +12,9 @@
 
 // Controls in VR:  left stick  forward/back = image size, left/right = camera delay
 //                  right stick = move the image (align it with the real passthrough)
-//                  click a stick = reset that stick's settings
+//                  hold a trigger + right stick = stereo trim (left/right = separation,
+//                                                 fwd/back = vertical mismatch)
+//                  click a stick = reset that stick's settings (with trigger: the stereo trim)
 // While adjusting, a text display shows the values and (in AR mode) the image turns
 // half see-through so it can be lined up with the passthrough behind it.
 const CAM_HFOV_DEFAULT = 70;      // degrees; image size
@@ -87,6 +89,8 @@ const camFov = tunable('camFov', 'camFov2', CAM_HFOV_DEFAULT, '°');
 const camDelay = tunable('camDelay', 'camDelay', CAM_DELAY_DEFAULT, ' ms');
 const camYaw = tunable('camYaw', 'camYaw', 0, '°', 1);       // + = image moved right
 const camPitch = tunable('camPitch', 'camPitch', 0, '°', 1);   // + = image moved up
+const camSep = tunable('camSep', 'camSep', 0, '°', 1);       // stereo: + = eye images move apart
+const camVert = tunable('camVert', 'camVert', 0, '°', 1);    // stereo: + = left image up, right down
 
 // Diagnostics: shown in the text display and in the status line when leaving VR.
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
@@ -95,6 +99,8 @@ let lastAdjust = -1e9, enteredAt = 0;
 
 function readSticks(session, dt, now) {
   input.sources = Math.max(input.sources, session.inputSources.length);
+  // Holding either trigger switches the right stick to the stereo trim.
+  const trim = session.inputSources.some((s) => s.gamepad && s.gamepad.buttons[0] && s.gamepad.buttons[0].value > 0.5);
   let pads = 0;
   for (const s of session.inputSources) {
     const g = s.gamepad, a = g && g.axes;
@@ -113,6 +119,9 @@ function readSticks(session, dt, now) {
     if (hand === 'left') {
       camFov.set(camFov.value - y * 25 * dt);       // forward = bigger image
       camDelay.set(camDelay.value + x * 60 * dt);   // right = more delay
+    } else if (trim) {
+      camSep.set(camSep.value + x * 3 * dt);        // right = images apart
+      camVert.set(camVert.value - y * 2 * dt);      // forward = left image up
     } else {
       camYaw.set(camYaw.value + x * 8 * dt);        // right = move right
       camPitch.set(camPitch.value - y * 8 * dt);    // forward = move up
@@ -121,6 +130,7 @@ function readSticks(session, dt, now) {
     if (click && !clicked[hand]) {
       lastAdjust = now;
       if (hand === 'left') { camFov.set(camFov.def); camDelay.set(camDelay.def); }
+      else if (trim) { camSep.set(0); camVert.set(0); }
       else { camYaw.set(0); camPitch.set(0); }
     }
     clicked[hand] = click;
@@ -130,7 +140,7 @@ function readSticks(session, dt, now) {
 
 // ---- text display ----
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 176;
+hudCanvas.width = 1024; hudCanvas.height = 248;
 const hudCtx = hudCanvas.getContext('2d');
 let hudTex = null, hudText = '';
 
@@ -139,6 +149,8 @@ function updateHud() {
     `size ${camFov.text()}    delay ${camDelay.text()}    move  x ${camYaw.text()}  y ${camPitch.text()}`,
     'LEFT stick: fwd/back = size, left/right = delay',
     'RIGHT stick: move image to line up with the room.  Click a stick = reset',
+    'Hold TRIGGER + right stick: stereo separation (left/right), vertical (fwd/back)',
+    `stereo ${stereoInfo}   separation ${camSep.text()}  vertical ${camVert.text()}`,
     `sticks  L[${input.raw.left}]  R[${input.raw.right}]`,
   ];
   const text = lines.join('\n');
@@ -154,9 +166,12 @@ function updateHud() {
   c.font = '28px sans-serif';
   c.fillText(lines[1], 20, 88);
   c.fillText(lines[2], 20, 124);
+  c.fillText(lines[3], 20, 160);
+  c.fillStyle = stereoOn ? '#8f8' : '#fc8';
+  c.fillText(lines[4], 20, 196);
   c.fillStyle = '#aaa';
   c.font = '22px monospace';
-  c.fillText(lines[3], 20, 160);
+  c.fillText(lines[5], 20, 232);
   if (!hudTex) { hudTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, hudTex); setTexParams(); }
   gl.bindTexture(gl.TEXTURE_2D, hudTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -193,7 +208,12 @@ function qAxis(ax, ay, az, deg) {
   return { x: ax * s, y: ay * s, z: az * s, w: Math.cos(h) };
 }
 // Alignment offset in head space: + yaw moves the image right, + pitch moves it up.
-const offsetQ = () => qMul(qAxis(0, 1, 0, -camYaw.value), qAxis(1, 0, 0, camPitch.value));
+// eye: -1 = left, +1 = right, 0 = mono; the stereo trim moves the two eye images oppositely.
+function offsetQ(eye) {
+  const yaw = camYaw.value + eye * camSep.value / 2;
+  const pitch = camPitch.value - eye * camVert.value / 2;
+  return qMul(qAxis(0, 1, 0, -yaw), qAxis(1, 0, 0, pitch));
+}
 
 // ---- head orientation history, to look up where the head pointed at capture time ----
 const history = [];   // { t, q }, oldest first, ~0.5 s
@@ -205,17 +225,21 @@ function poseAt(t) {
   return history.length ? history[0].q : null;
 }
 
-let captureQ = null, seenFrames = -1, lastNewFrame = 0;
+// Per lane (eye camera): head orientation when its current frame was captured.
+const captureQ = [null, null], seenFrames = [-1, -1], lastNewFrame = [0, 0];
 function updateCaptureOrientation(now, headQ) {
   history.push({ t: now, q: copyQ(headQ) });
   while (history.length > 2 && history[0].t < now - 500) history.shift();
-  if (camFrames.count !== seenFrames) {          // a new camera frame arrived
-    seenFrames = camFrames.count;
-    lastNewFrame = now;
-    captureQ = poseAt(camFrames.presentationTime - camDelay.value);
-  } else if (now - lastNewFrame > 300) {         // no frame callbacks in VR: delay only
-    captureQ = poseAt(now - camDelay.value);
-  }
+  lanes.forEach((lane, i) => {
+    const f = lane.frames;
+    if (f.count !== seenFrames[i]) {               // a new camera frame arrived
+      seenFrames[i] = f.count;
+      lastNewFrame[i] = now;
+      captureQ[i] = poseAt(f.presentationTime - camDelay.value);
+    } else if (now - lastNewFrame[i] > 300) {      // no frame callbacks in VR: delay only
+      captureQ[i] = poseAt(now - camDelay.value);
+    }
+  });
 }
 
 // ---- eff_int source in the headset: smoothed head motion (0 = still, 1 = moving) ----
@@ -257,9 +281,9 @@ async function enterXR() {
     xrRefSpace = await session.requestReferenceSpace('local');
     session.addEventListener('end', () => {
       xrSession = null;
-      lastPose = null; captureQ = null; history.length = 0;
+      lastPose = null; captureQ.fill(null); history.length = 0;
       rotSpeed = moveSpeed = 0; xrLast = 0;
-      for (const t of [camFov, camDelay, camYaw, camPitch]) t.save();
+      for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert]) t.save();
       setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}. ` +
         `Size ${camFov.text()}, delay ${camDelay.text()}, move x ${camYaw.text()} y ${camPitch.text()}.`);
       input.sources = input.gamepads = 0;
@@ -296,8 +320,11 @@ function xrFrame(now, frame) {
   // Render targets match the camera, so nothing is cropped.
   const [w, h] = capSize(src.videoWidth, src.videoHeight);
   setTargetSize(w, h);
-  const out = renderChain((now - startTime) / 1000);
-  if (!out) return;
+  // Stereo: one chain per eye camera; otherwise lane 0 for both eyes.
+  const time = (now - startTime) / 1000;
+  const stereo = !!getSourceElement(1);
+  const outs = [renderChain(time, 0), stereo ? renderChain(time, 1) : null];
+  if (!outs[0]) return;
 
   const adjusting = now - lastAdjust < ADJUST_SHOW_MS;
   const showHud = adjusting || performance.now() - enteredAt < INTRO_SHOW_MS;
@@ -307,16 +334,20 @@ function xrFrame(now, frame) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied alpha
   const hx = Math.tan((camFov.value / 2) * Math.PI / 180);
-  const capQ = qMul(captureQ || pose.transform.orientation, offsetQ());
+  const swap = $('swapEyes').checked;
   for (const view of pose.views) {
     const vp = layer.getViewport(view);
     gl.viewport(vp.x, vp.y, vp.width, vp.height);
+    const eye = view.eye === 'left' ? -1 : view.eye === 'right' ? 1 : 0;
+    const lane = stereo && outs[1] && ((eye === 1) !== swap) ? 1 : 0;
+    const laneSrc = getSourceElement(lane) || src;
+    const capQ = qMul(captureQ[lane] || pose.transform.orientation, offsetQ(stereo ? eye : 0));
 
     gl.useProgram(presentProg.prog);
-    bindTex(0, out);
+    bindTex(0, outs[lane]);
     gl.uniform1i(presentProg.u.u_tex, 0);
     gl.uniform1f(presentProg.u.u_alpha, adjusting && xrMode === 'immersive-ar' ? ADJUST_ALPHA : 1);
-    gl.uniform2f(presentProg.u.u_half, hx, hx * src.videoHeight / src.videoWidth);
+    gl.uniform2f(presentProg.u.u_half, hx, hx * laneSrc.videoHeight / laneSrc.videoWidth);
     gl.uniformMatrix4fv(presentProg.u.u_proj, false, view.projectionMatrix);
     gl.uniformMatrix3fv(presentProg.u.u_rot, false, qToMat3(qMul(qConj(view.transform.orientation), capQ)));
     gl.drawArrays(gl.TRIANGLES, 0, 6);

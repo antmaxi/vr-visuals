@@ -10,16 +10,80 @@ const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: 
 if (!gl) document.body.innerHTML = '<p style="color:#fff;padding:20px">WebGL2 is not available in this browser.</p>';
 
 // ============================================================================
-// Input source (swap later for the headset camera).
-// Must provide: getSourceElement() -> a video/canvas/image ready to upload, or null.
+// Input source.
+// Must provide: getSourceElement(lane) -> a video/canvas/image ready to upload, or null.
+// Lane 0 = the camera/video (left eye in stereo), lane 1 = the right camera (stereo only).
 // ============================================================================
-const video = document.createElement('video');
-video.muted = true; video.loop = true; video.playsInline = true;
-let camStream = null;
+// New-frame timing per lane from the browser (fps readout and headset reprojection).
+// presentationTime is on the performance.now() clock.
+function makeLane() {
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.playsInline = true;
+  const lane = { video: v, stream: null, frames: { count: 0, presentationTime: 0 } };
+  if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+    const onFrame = (now, meta) => {
+      lane.frames.count++;
+      lane.frames.presentationTime = meta.presentationTime || now;
+      v.requestVideoFrameCallback(onFrame);
+    };
+    v.requestVideoFrameCallback(onFrame);
+  }
+  return lane;
+}
+const lanes = [makeLane(), makeLane()];
+const video = lanes[0].video;
+let camStream = null;            // lane 0 camera stream
+let stereoOn = false;            // lane 1 (right camera) is running
+let stereoInfo = 'off';
 
 function stopCamera() {
   if (camStream) camStream.getTracks().forEach((t) => t.stop());
   camStream = null;
+  lanes[0].stream = null;
+}
+
+function stopStereo(info = 'off') {
+  const l = lanes[1];
+  if (l.stream) l.stream.getTracks().forEach((t) => t.stop());
+  l.stream = null;
+  l.video.srcObject = null;
+  stereoOn = false;
+  stereoInfo = info;
+}
+
+async function videoInputs() {
+  return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+}
+
+// Stereo: lane 0 = left camera, lane 1 = right camera. On the Quest the passthrough cameras
+// are labelled "camera 1 ..." (left) and "camera 2 ..." (right); otherwise use the current
+// camera plus the next one.
+async function startStereo() {
+  stopStereo();
+  if (!camStream) { stopStereo('off - start the webcam first'); return; }
+  const cams = await videoInputs();
+  const byNum = (n) => cams.find((d) => new RegExp(`camera\\s*${n}\\b`, 'i').test(d.label));
+  let left = byNum(1), right = byNum(2);
+  const current = camStream.getVideoTracks()[0].getSettings().deviceId;
+  if (left && right) {
+    if (current !== left.deviceId) await useWebcam(left.deviceId, true);
+  } else {
+    left = cams.find((d) => d.deviceId === current);
+    right = cams.find((d) => d.deviceId !== current);
+  }
+  if (!right) { stopStereo('off - only one camera found'); setStatus('Stereo ' + stereoInfo); return; }
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: right.deviceId }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+    lanes[1].stream = s;
+    lanes[1].video.srcObject = s;
+    await lanes[1].video.play();
+    stereoOn = true;
+    stereoInfo = `on (L: ${(left && left.label) || 'camera'}, R: ${right.label || 'camera'})`;
+  } catch (e) {
+    stopStereo('off - right camera failed: ' + e.message);
+  }
+  setStatus('Stereo ' + stereoInfo);
 }
 
 // Per-viewer preferences (camera choice, FOV). Storage can be unavailable; never rely on it.
@@ -27,7 +91,8 @@ function loadPref(key) { try { return localStorage.getItem(key); } catch { retur
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch { /* ignore */ } }
 
 // deviceId: a specific camera (from the picker); otherwise the remembered one, else the default.
-async function useWebcam(deviceId) {
+// fromStereo: called by startStereo itself (don't restart stereo again).
+async function useWebcam(deviceId, fromStereo = false) {
   const wanted = deviceId || loadPref('camId');
   const anyCam = { width: { ideal: 1280 }, height: { ideal: 720 } };
   try {
@@ -39,12 +104,14 @@ async function useWebcam(deviceId) {
       if (!wanted) throw e;  // remembered camera is gone: fall back to the default one
       camStream = await navigator.mediaDevices.getUserMedia({ video: anyCam, audio: false });
     }
+    lanes[0].stream = camStream;
     video.removeAttribute('src');
     video.srcObject = camStream;
     await video.play();
     const label = camStream.getVideoTracks()[0].label;
     setStatus('Webcam' + (label ? ': ' + label : ''));
     await fillCameraList();
+    if (!fromStereo && $('stereo').checked) await startStereo();
   } catch (e) {
     setStatus('Webcam failed: ' + e.message);
   }
@@ -53,7 +120,7 @@ async function useWebcam(deviceId) {
 // Camera labels are only available after permission, so fill the picker after the first start.
 async function fillCameraList() {
   const sel = $('camSel');
-  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  const cams = await videoInputs();
   const current = camStream && camStream.getVideoTracks()[0].getSettings().deviceId;
   sel.textContent = '';
   cams.forEach((d, i) => sel.add(new Option(d.label || `camera ${i + 1}`, d.deviceId, false, d.deviceId === current)));
@@ -62,6 +129,7 @@ async function fillCameraList() {
 
 async function useVideoFile(file) {
   stopCamera();
+  stopStereo('off (video file: mono only)');
   video.srcObject = null;
   if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(file);
@@ -69,20 +137,10 @@ async function useVideoFile(file) {
   catch (e) { setStatus('Cannot play ' + file.name + ': ' + e.message); }
 }
 
-function getSourceElement() {
-  return video.readyState >= 2 && video.videoWidth > 0 ? video : null;
-}
-
-// New-frame timing from the browser (used for the fps readout and headset reprojection).
-// presentationTime is on the performance.now() clock.
-const camFrames = { count: 0, presentationTime: 0 };
-if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-  const onFrame = (now, meta) => {
-    camFrames.count++;
-    camFrames.presentationTime = meta.presentationTime || now;
-    video.requestVideoFrameCallback(onFrame);
-  };
-  video.requestVideoFrameCallback(onFrame);
+function getSourceElement(lane = 0) {
+  if (lane === 1 && !stereoOn) return null;
+  const v = lanes[lane].video;
+  return v.readyState >= 2 && v.videoWidth > 0 ? v : null;
 }
 
 // ============================================================================
@@ -258,7 +316,7 @@ function setTexParams() {
 // ============================================================================
 // Effects: discovery, ordering, hot reload
 // ============================================================================
-/** name -> { name, src, prog, u, error, enabled, params, rts:[a,b], cur } */
+/** name -> { name, src, prog, u, error, enabled, params, rts: per lane [a, b], cur: per lane index } */
 const effects = new Map();
 const enabledState = new Map();  // remembers checkbox state across reloads
 const paramState = new Map();    // "file:uniform" -> slider value the user set (survives reloads)
@@ -313,7 +371,7 @@ function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
 function loadEffect(name, src) {
   let e = effects.get(name);
   if (!e) {
-    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [null, null], cur: 0 };
+    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [[null, null], [null, null]], cur: [0, 0] };
     effects.set(name, e);
   }
   if (e.prog) gl.deleteProgram(e.prog);
@@ -343,12 +401,17 @@ function unloadEffect(name) {
   const e = effects.get(name);
   if (!e) return;
   if (e.prog) gl.deleteProgram(e.prog);
-  freeTarget(e.rts[0]); freeTarget(e.rts[1]);
+  freeEffectTargets(e);
   effects.delete(name);
 }
 
+function freeEffectTargets(e) {
+  for (const pair of e.rts) { freeTarget(pair[0]); freeTarget(pair[1]); }
+  e.rts = [[null, null], [null, null]];
+}
+
 function resetFeedback(e) {
-  for (const t of e.rts) if (t) clearTarget(t);
+  for (const pair of e.rts) for (const t of pair) if (t) clearTarget(t);
 }
 
 let polling = false;
@@ -454,6 +517,13 @@ effIntSlider.oninput = () => { effInt = Number(effIntSlider.value); };
 autoBox.onchange = () => { effIntSlider.disabled = autoBox.checked; prevLuma = null; };
 
 $('camBtn').onclick = () => useWebcam();
+$('stereo').checked = loadPref('stereo') === '1';
+$('swapEyes').checked = loadPref('swapEyes') === '1';
+$('stereo').onchange = (ev) => {
+  savePref('stereo', ev.target.checked ? '1' : '0');
+  if (ev.target.checked) startStereo(); else { stopStereo(); setStatus('Stereo off'); }
+};
+$('swapEyes').onchange = (ev) => savePref('swapEyes', ev.target.checked ? '1' : '0');
 $('camSel').onchange = (ev) => { savePref('camId', ev.target.value); useWebcam(ev.target.value); };
 $('fileIn').onchange = (ev) => { const f = ev.target.files[0]; if (f) useVideoFile(f); };
 $('toggle').onclick = () => $('panel').classList.toggle('hidden');
@@ -472,15 +542,19 @@ window.addEventListener('drop', (ev) => {
 // ============================================================================
 // Render loop
 // ============================================================================
-let sourceProg, copyProg, sourceTex, sourceRT = null;
+let sourceProg, copyProg;
+const sourceTex = [null, null];   // per lane: uploaded camera frame
+const sourceRT = [null, null];    // per lane: cover-fitted input to the chain
 
 function initGL() {
   sourceProg = linkProgram(SOURCE_FRAG);
   copyProg = linkProgram(COPY_FRAG);
   gl.bindVertexArray(gl.createVertexArray());
-  sourceTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, sourceTex);
-  setTexParams();
+  for (let i = 0; i < 2; i++) {
+    sourceTex[i] = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, sourceTex[i]);
+    setTexParams();
+  }
 }
 
 // Fit (w, h) inside MAX_DIM, keeping the aspect ratio.
@@ -501,16 +575,13 @@ function resize() {
 function setTargetSize(w, h) {
   if (w === rtW && h === rtH) return;
   rtW = w; rtH = h;
-  freeTarget(sourceRT);
-  sourceRT = makeTarget(w, h);
-  for (const e of effects.values()) {
-    freeTarget(e.rts[0]); freeTarget(e.rts[1]);
-    e.rts = [null, null];
-  }
+  for (let i = 0; i < 2; i++) { freeTarget(sourceRT[i]); sourceRT[i] = null; }
+  for (const e of effects.values()) freeEffectTargets(e);
 }
 
-function ensureTargets(e) {
-  if (!e.rts[0]) e.rts = [makeTarget(rtW, rtH), makeTarget(rtW, rtH)];
+// Targets are created on first use, so the right-eye lane costs nothing in mono.
+function ensureTargets(e, lane) {
+  if (!e.rts[lane][0]) e.rts[lane] = [makeTarget(rtW, rtH), makeTarget(rtW, rtH)];
 }
 
 function bindTex(unit, tex) {
@@ -543,14 +614,16 @@ function showEffInt() {
   $('effIntVal').textContent = effInt.toFixed(2);
 }
 
-// Stats readout, twice a second: camera size and fps, render fps.
-const stats = { renderFrames: 0, t0: performance.now(), cam0: 0 };
+// Stats readout, twice a second: camera size and fps (per eye in stereo), render fps.
+const stats = { renderFrames: 0, t0: performance.now(), cam0: [0, 0] };
 setInterval(() => {
   const now = performance.now(), secs = (now - stats.t0) / 1000;
-  const camFps = (camFrames.count - stats.cam0) / secs, renderFps = stats.renderFrames / secs;
-  stats.t0 = now; stats.cam0 = camFrames.count; stats.renderFrames = 0;
+  const fps = lanes.map((l, i) => (l.frames.count - stats.cam0[i]) / secs);
+  const renderFps = stats.renderFrames / secs;
+  stats.t0 = now; stats.cam0 = lanes.map((l) => l.frames.count); stats.renderFrames = 0;
+  const cams = stereoOn ? `L ${fps[0].toFixed(0)} / R ${fps[1].toFixed(0)} fps` : `${fps[0].toFixed(0)} fps`;
   $('stats').textContent = video.videoWidth
-    ? `camera ${video.videoWidth}x${video.videoHeight} @ ${camFps.toFixed(0)} fps · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps`
+    ? `camera ${video.videoWidth}x${video.videoHeight} @ ${cams} · render ${rtW}x${rtH} @ ${renderFps.toFixed(0)} fps · stereo ${stereoInfo}`
     : '';
 }, 500);
 
@@ -577,16 +650,21 @@ function frame(now) {
   draw(copyProg, null, out, null, 0);
 }
 
-// Upload the current source frame and run the effect chain into the render targets.
-// Returns the final texture, or null when there is no source yet.
-function renderChain(time) {
-  frameDt = lastChainTime === null ? 0 : Math.min(0.1, Math.max(0, time - lastChainTime));
-  lastChainTime = time;
-  const src = getSourceElement();
+// Upload the lane's current frame and run the effect chain into that lane's render targets
+// (each lane = eye has its own feedback state). Returns the final texture, or null.
+function renderChain(time, lane = 0) {
+  // u_dt: time since the previous frame. Only lane 0 advances it, so the right eye
+  // (rendered right after, same frame) gets the same u_dt instead of 0.
+  if (lane === 0) {
+    frameDt = lastChainTime === null ? 0 : Math.min(0.1, Math.max(0, time - lastChainTime));
+    lastChainTime = time;
+  }
+  const src = getSourceElement(lane);
   if (!src) return null;
+  if (!sourceRT[lane]) sourceRT[lane] = makeTarget(rtW, rtH);
 
   // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy).
-  bindTex(0, sourceTex);
+  bindTex(0, sourceTex[lane]);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -595,16 +673,16 @@ function renderChain(time) {
   const ca = rtW / rtH, va = src.videoWidth / src.videoHeight;
   gl.useProgram(sourceProg.prog);
   gl.uniform2f(sourceProg.u.u_scale, ca > va ? 1 : ca / va, ca > va ? va / ca : 1);
-  draw(sourceProg, sourceRT.fbo, sourceTex, null, time);
+  draw(sourceProg, sourceRT[lane].fbo, sourceTex[lane], null, time);
 
   // Effect chain.
-  let input = sourceRT.tex;
+  let input = sourceRT[lane].tex;
   for (const e of chain) {
     if (!e.enabled || !e.prog) continue;
-    ensureTargets(e);
-    const write = e.rts[e.cur], prev = e.rts[1 - e.cur];
+    ensureTargets(e, lane);
+    const c = e.cur[lane], write = e.rts[lane][c], prev = e.rts[lane][1 - c];
     draw(e, write.fbo, input, prev.tex, time);
-    e.cur = 1 - e.cur;
+    e.cur[lane] = 1 - c;
     input = write.tex;
   }
   return input;

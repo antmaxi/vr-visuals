@@ -99,11 +99,13 @@ The headset's cameras can only be used on a secure page, so open the **GitHub Pa
    - **Click a stick** (press it down) to reset that stick's settings.
    While you adjust, a text display shows the values and the image turns half see-through, so you can match it against the real passthrough behind it. The values are remembered and also shown as sliders in the panel.
 
+**Stereo (depth):** tick **stereo (both cameras)** after starting the webcam. The left headset camera then goes to the left eye and the right camera to the right eye; the status line and stats say whether both cameras opened ("stereo on (L: ..., R: ...)") or why not (then it falls back to one camera for both eyes). In VR, if the two eye images don't fuse comfortably, **hold a trigger and use the right stick**: left/right = separation, forward/back = vertical mismatch (click the stick while holding the trigger to reset). If depth looks inside-out, tick **swap eyes**. Stereo runs the effect chain twice (once per eye), so it costs about twice the GPU time; watch the render fps in the stats line.
+
 `eff_int` auto mode uses **head motion** in the headset (it drops when you turn your head, builds up when you hold still).
 
 The panel shows the camera resolution and frame rate, and the render frame rate. Check these first if something looks jerky.
 
-Known limits for now: one camera is shown to both eyes (no depth). The image is turned to stay put in the room between camera frames, but only for rotation, so nearby things can still shift a little when you move your head sideways. On a fast turn you briefly see the edge of the image. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
+Known limits for now: without stereo, one camera is shown to both eyes (no depth). The image is turned to stay put in the room between camera frames, but only for rotation, so nearby things can still shift a little when you move your head sideways. On a fast turn you briefly see the edge of the image. Effects still hot-reload while you are inside. Needs Quest 3 / 3S with recent software; this is reported by other developers, not yet checked on our headset.
 
 ## Hosted version
 

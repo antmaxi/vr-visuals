@@ -35,6 +35,10 @@
   <button id="toggle" title="Show/hide panel (H)">–</button>
   <h3>Input</h3>
   <div class="row"><button id="camBtn">Webcam</button><select id="camSel" hidden></select></div>
+  <div class="row">
+    <label title="Left camera to the left eye, right camera to the right eye (headset)"><input id="stereo" type="checkbox"> stereo (both cameras)</label>
+    <label><input id="swapEyes" type="checkbox"> swap eyes</label>
+  </div>
   <div class="row"><input id="fileIn" type="file" accept="video/*"></div>
   <div id="status">Pick webcam or a video (or drop a video file on the page).</div>
   <div id="stats" class="note"></div>
@@ -63,7 +67,16 @@
       <input id="camPitch" type="range" min="-30" max="30" step="0.1" value="0" style="flex:1">
       <span id="camPitchVal">0.0°</span>
     </div>
-    <div class="note">In VR: left stick fwd/back = size, left/right = delay. Right stick = move image. Click a stick = reset.</div>
+    <div class="row">stereo sep.
+      <input id="camSep" type="range" min="-10" max="10" step="0.1" value="0" style="flex:1">
+      <span id="camSepVal">0.0°</span>
+    </div>
+    <div class="row">stereo vert.
+      <input id="camVert" type="range" min="-5" max="5" step="0.1" value="0" style="flex:1">
+      <span id="camVertVal">0.0°</span>
+    </div>
+    <div class="note">In VR: left stick fwd/back = size, left/right = delay. Right stick = move image.
+      Hold a trigger + right stick = stereo separation / vertical. Click a stick = reset.</div>
   </div>
   <h3>Chain</h3>
   <ol id="effects"></ol>
