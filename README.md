@@ -35,7 +35,7 @@ If port 8000 is taken (`OSError: [Errno 98] Address already in use`, or the page
 
 Use `localhost` in the address, not your machine's IP: browsers only allow the webcam on `localhost` or HTTPS pages, and the server only listens on `localhost` anyway.
 
-If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect, and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
+If you have several cameras, a dropdown next to **Webcam** lets you pick one. The panel shows the effect chain, one checkbox per effect (plus any sliders the effect declares), and the `eff_int` slider. **auto** makes `eff_int` build up slowly while the image is still and drop fast when it moves. Press **H** to hide the panel.
 
 Saving an effect file updates the page within about a second. Compile errors appear next to the effect's name, with line numbers from your file; that effect is skipped and the rest keep running.
 
@@ -53,6 +53,16 @@ Saving an effect file updates the page within about a second. Compile errors app
 | `vec2 u_res` | output size in pixels |
 
 `uv` runs 0..1 with (0,0) at the bottom-left. Files starting with `_` are ignored.
+
+### Effect parameters (sliders)
+
+To get a slider for your effect in the panel, declare a `float` uniform in your file with an `@param` comment giving min, max and default:
+
+```glsl
+uniform float colorfulness; // @param -1 1 0
+```
+
+The slider appears under your effect's checkbox and the harness sets the uniform every frame. Double-click a slider to reset it to the default. The rule above still holds: with `eff_int = 0` the output must equal the input whatever the sliders say.
 
 ## Rules
 

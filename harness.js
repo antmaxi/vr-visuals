@@ -257,9 +257,10 @@ function setTexParams() {
 // ============================================================================
 // Effects: discovery, ordering, hot reload
 // ============================================================================
-/** name -> { name, src, prog, u, error, enabled, rts:[a,b], cur } */
+/** name -> { name, src, prog, u, error, enabled, params, rts:[a,b], cur } */
 const effects = new Map();
 const enabledState = new Map();  // remembers checkbox state across reloads
+const paramState = new Map();    // "file:uniform" -> slider value the user set (survives reloads)
 let chain = [];                  // ordered list of effect objects
 let orderText = null;
 let rtW = 0, rtH = 0;
@@ -289,10 +290,29 @@ function computeOrder(names, order) {
   return out;
 }
 
+// Per-effect sliders, declared in the effect file as:
+//   uniform float <name>; // @param <min> <max> <default>
+const PARAM_RE = /^\s*uniform\s+float\s+(\w+)\s*;\s*\/\/\s*@param\b(.*)$/gm;
+
+function parseParams(name, src) {
+  const out = [];
+  for (const m of src.matchAll(PARAM_RE)) {
+    const [min, max, def] = m[2].trim().split(/\s+/).map(Number);
+    if (![min, max, def].every(Number.isFinite) || !(max > min)) {
+      console.warn(`[${name}] ignoring "@param" for ${m[1]}: expected "@param <min> <max> <default>"`);
+      continue;
+    }
+    out.push({ name: m[1], min, max, def: clamp(def, min, max) });
+  }
+  return out;
+}
+
+function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
+
 function loadEffect(name, src) {
   let e = effects.get(name);
   if (!e) {
-    e = { name, src: null, prog: null, u: null, error: null, rts: [null, null], cur: 0 };
+    e = { name, src: null, prog: null, u: null, error: null, params: [], rts: [null, null], cur: 0 };
     effects.set(name, e);
   }
   if (e.prog) gl.deleteProgram(e.prog);
@@ -304,6 +324,16 @@ function loadEffect(name, src) {
     e.error = mapErrorLines(err.message, src.split('\n').length);
     console.warn(`[${name}]\n${e.error}`);
   }
+  // Untouched sliders follow the file's default; ones the user moved keep their value.
+  e.params = parseParams(name, src).map((q) => {
+    const key = name + ':' + q.name;
+    return {
+      ...q,
+      key,
+      value: paramState.has(key) ? clamp(paramState.get(key), q.min, q.max) : q.def,
+      loc: e.prog ? gl.getUniformLocation(e.prog, q.name) : null,
+    };
+  });
   e.enabled = enabledState.has(name) ? enabledState.get(name) : true;
   resetFeedback(e);
 }
@@ -380,6 +410,7 @@ function renderPanel() {
     };
     label.append(cb, ' ', e.name.replace(/\.glsl$/, ''));
     li.append(label);
+    if (!e.error) for (const q of e.params) li.append(paramRow(q));
     if (e.error) {
       const err = document.createElement('div');
       err.className = 'err';
@@ -392,6 +423,27 @@ function renderPanel() {
   orderNote.className = 'note';
   orderNote.textContent = orderText === null ? 'order: no order.txt (alphabetical)' : 'order: from order.txt, then alphabetical';
   ol.append(orderNote);
+}
+
+// One slider row for an effect parameter. Double-click the slider to reset to the default.
+function paramRow(q) {
+  const row = document.createElement('div');
+  row.className = 'row param';
+  const name = document.createElement('span');
+  name.textContent = q.name;
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = q.min; slider.max = q.max; slider.step = (q.max - q.min) / 1000;
+  slider.value = q.value;
+  slider.title = `${q.min} .. ${q.max}, default ${q.def} (double-click to reset)`;
+  const val = document.createElement('span');
+  val.className = 'val';
+  const show = () => { val.textContent = q.value.toFixed(2); };
+  slider.oninput = () => { q.value = Number(slider.value); paramState.set(q.key, q.value); show(); };
+  slider.ondblclick = () => { q.value = q.def; slider.value = q.def; paramState.delete(q.key); show(); };
+  show();
+  row.append(name, slider, val);
+  return row;
 }
 
 const effIntSlider = $('effInt');
@@ -474,6 +526,7 @@ function draw(p, fbo, inTex, prevTex, time) {
   gl.uniform1f(p.u.u_time, time);
   gl.uniform1f(p.u.eff_int, effInt);
   gl.uniform2f(p.u.u_res, rtW, rtH);
+  if (p.params) for (const q of p.params) if (q.loc) gl.uniform1f(q.loc, q.value);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
