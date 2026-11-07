@@ -90,11 +90,19 @@ const camDelay = tunable('camDelay', 'camDelay', CAM_DELAY_DEFAULT, ' ms');
 const camYaw = tunable('camYaw', 'camYaw', 0, '°', 1);       // + = image moved right
 const camPitch = tunable('camPitch', 'camPitch', 0, '°', 1);   // + = image moved up
 const camSep = tunable('camSep', 'camSep', 0, '°', 1);       // stereo: + = eye images move apart
+const xrRes = tunable('xrRes', 'xrRes', 960, ' px');       // VR render size (longest side)
 const camVert = tunable('camVert', 'camVert', 0, '°', 1);    // stereo: + = left image up, right down
 
 // Diagnostics: shown in the text display and in the status line when leaving VR.
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
 const clicked = { left: false, right: false };
+const camFps = [0, 0], camFps0 = [0, 0];
+let camFpsT = performance.now();
+setInterval(() => {
+  const now = performance.now(), secs = (now - camFpsT) / 1000;
+  lanes.forEach((l, i) => { camFps[i] = (l.frames.count - camFps0[i]) / secs; camFps0[i] = l.frames.count; });
+  camFpsT = now;
+}, 1000);
 let lastAdjust = -1e9, enteredAt = 0;
 
 function readSticks(session, dt, now) {
@@ -140,18 +148,20 @@ function readSticks(session, dt, now) {
 
 // ---- text display ----
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 248;
+hudCanvas.width = 1024; hudCanvas.height = 290;
 const hudCtx = hudCanvas.getContext('2d');
 let hudTex = null, hudText = '';
 
-function updateHud() {
+function updateHud(problem = '') {
+  const cams = lanes.map((l, i) => i === 0 || stereoOn ? Math.round(camFps[i]) : null).filter((v) => v !== null).join('/');
   const lines = [
     `size ${camFov.text()}    delay ${camDelay.text()}    move  x ${camYaw.text()}  y ${camPitch.text()}`,
     'LEFT stick: fwd/back = size, left/right = delay',
     'RIGHT stick: move image to line up with the room.  Click a stick = reset',
     'Hold TRIGGER + right stick: stereo separation (left/right), vertical (fwd/back)',
     `stereo ${stereoInfo}   separation ${camSep.text()}  vertical ${camVert.text()}`,
-    `sticks  L[${input.raw.left}]  R[${input.raw.right}]`,
+    `sticks  L[${input.raw.left}]  R[${input.raw.right}]   VR ${Math.round(xrPerf.fps)} fps  camera ${cams} fps  render ${rtW}x${rtH}`,
+    problem,
   ];
   const text = lines.join('\n');
   if (text === hudText && hudTex) return;
@@ -172,6 +182,11 @@ function updateHud() {
   c.fillStyle = '#aaa';
   c.font = '22px monospace';
   c.fillText(lines[5], 20, 232);
+  if (lines[6]) {
+    c.fillStyle = '#f66';
+    c.font = 'bold 28px sans-serif';
+    c.fillText(lines[6], 20, 272);
+  }
   if (!hudTex) { hudTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, hudTex); setTexParams(); }
   gl.bindTexture(gl.TEXTURE_2D, hudTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -285,11 +300,13 @@ async function enterXR() {
       rotSpeed = moveSpeed = 0; xrLast = 0;
       for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert]) t.save();
       setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}. ` +
-        `Size ${camFov.text()}, delay ${camDelay.text()}, move x ${camYaw.text()} y ${camPitch.text()}.`);
+        `Size ${camFov.text()}, delay ${camDelay.text()}, move x ${camYaw.text()} y ${camPitch.text()}. ` +
+        `VR ${Math.round(xrPerf.fps)} fps.` + (xrError ? ' Problem: ' + xrError : ''));
       input.sources = input.gamepads = 0;
     });
     xrSession = session;
     enteredAt = performance.now();
+    xrError = ''; xrPerf.frames = 0; xrPerf.t0 = 0; xrPerf.fps = 0; xrPerf.slowSince = 0;
     session.requestAnimationFrame(xrFrame);
   } catch (e) {
     xrSession = null;
@@ -297,29 +314,63 @@ async function enterXR() {
   }
 }
 
+// Problems shown in VR (and in the status line after leaving).
+let xrError = '';
+const xrPerf = { frames: 0, t0: 0, fps: 0, slowSince: 0 };
+if (canvas) canvas.addEventListener('webglcontextlost', () => {
+  xrError = 'GPU context lost (effects too heavy?). Reload the page.';
+  setStatus(xrError);
+});
+
 function xrFrame(now, frame) {
   const session = frame.session;
   session.requestAnimationFrame(xrFrame);
   const dt = xrLast ? Math.min(0.1, (now - xrLast) / 1000) : 0;
   xrLast = now;
   stats.renderFrames++;
+  xrPerf.frames++;
+  if (!xrPerf.t0) xrPerf.t0 = now;
+  if (now - xrPerf.t0 > 1000) {
+    xrPerf.fps = (xrPerf.frames * 1000) / (now - xrPerf.t0 || 1);
+    xrPerf.frames = 0; xrPerf.t0 = now;
+    xrPerf.slowSince = xrPerf.fps < 30 ? xrPerf.slowSince || now : 0;
+  }
 
   const pose = frame.getViewerPose(xrRefSpace);
   const layer = session.renderState.baseLayer;
-  const src = getSourceElement();
   gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
   gl.clearColor(0, 0, 0, xrMode === 'immersive-ar' ? 0 : 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
-  if (!pose || !src) return;
+  if (!pose) return;
 
-  readSticks(session, dt, now);
-  const m = headMotion(pose.transform, dt);
-  if (autoBox.checked) effInt = autoEffInt(effInt, dt, m);
-  updateCaptureOrientation(now, pose.transform.orientation);
+  let problem = xrError;
+  try {
+    readSticks(session, dt, now);
+    const m = headMotion(pose.transform, dt);
+    if (autoBox.checked) effInt = autoEffInt(effInt, dt, m);
+    updateCaptureOrientation(now, pose.transform.orientation);
+    const src = getSourceElement();
+    if (!src) problem = problem || 'no camera frame - is the webcam running?';
+    else drawCamera(now, pose, layer, src);
+  } catch (e) {
+    xrError = problem = 'error: ' + (e && e.message ? e.message : e);
+    console.error(e);
+  }
+  if (!problem && xrPerf.slowSince && now - xrPerf.slowSince > 2000) {
+    problem = 'too slow - untick some effects, lower VR render size, or turn stereo off';
+  }
 
-  // Render targets match the camera, so nothing is cropped.
-  const [w, h] = capSize(src.videoWidth, src.videoHeight);
-  setTargetSize(w, h);
+  // Text display: while adjusting, for a few seconds after entering, and whenever there is a problem.
+  const show = problem || now - lastAdjust < ADJUST_SHOW_MS || performance.now() - enteredAt < INTRO_SHOW_MS;
+  if (show) {
+    try { updateHud(problem); drawHud(pose, layer); } catch (e) { console.error(e); }
+  }
+}
+
+function drawCamera(now, pose, layer, src) {
+  // Render targets follow the camera shape, capped by the VR render size setting.
+  const s = Math.min(1, xrRes.value / Math.max(src.videoWidth, src.videoHeight));
+  setTargetSize(Math.max(1, Math.round(src.videoWidth * s)), Math.max(1, Math.round(src.videoHeight * s)));
   // Stereo: one chain per eye camera; otherwise lane 0 for both eyes.
   const time = (now - startTime) / 1000;
   const stereo = !!getSourceElement(1);
@@ -327,9 +378,6 @@ function xrFrame(now, frame) {
   if (!outs[0]) return;
 
   const adjusting = now - lastAdjust < ADJUST_SHOW_MS;
-  const showHud = adjusting || performance.now() - enteredAt < INTRO_SHOW_MS;
-  if (showHud) updateHud();
-
   gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied alpha
@@ -351,16 +399,24 @@ function xrFrame(now, frame) {
     gl.uniformMatrix4fv(presentProg.u.u_proj, false, view.projectionMatrix);
     gl.uniformMatrix3fv(presentProg.u.u_rot, false, qToMat3(qMul(qConj(view.transform.orientation), capQ)));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+  gl.disable(gl.BLEND);
+}
 
-    if (showHud) {
-      gl.useProgram(hudProg.prog);
-      bindTex(0, hudTex);
-      gl.uniform1i(hudProg.u.u_tex, 0);
-      gl.uniformMatrix4fv(hudProg.u.u_proj, false, view.projectionMatrix);
-      const w2 = 0.36, h = (2 * w2 * hudCanvas.height) / hudCanvas.width, y0 = -0.42;
-      gl.uniform4f(hudProg.u.u_rect, -w2, y0, w2, y0 + h);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
+function drawHud(pose, layer) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(hudProg.prog);
+  bindTex(0, hudTex);
+  gl.uniform1i(hudProg.u.u_tex, 0);
+  const w2 = 0.36, h = (2 * w2 * hudCanvas.height) / hudCanvas.width, y0 = -0.42;
+  gl.uniform4f(hudProg.u.u_rect, -w2, y0, w2, y0 + h);
+  for (const view of pose.views) {
+    const vp = layer.getViewport(view);
+    gl.viewport(vp.x, vp.y, vp.width, vp.height);
+    gl.uniformMatrix4fv(hudProg.u.u_proj, false, view.projectionMatrix);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
   gl.disable(gl.BLEND);
 }

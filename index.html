@@ -57,6 +57,10 @@
   <div id="xrBox" hidden>
     <h3>Headset</h3>
     <div class="row"><button id="xrBtn" disabled title="Start the webcam first">Enter VR</button></div>
+    <div class="row" title="Longest side of the effect render in VR. Lower = faster (each effect runs once per eye in stereo).">VR render size
+      <input id="xrRes" type="range" min="320" max="1920" step="32" value="960" style="flex:1">
+      <span id="xrResVal">960 px</span>
+    </div>
     <div class="row">camera FOV
       <input id="camFov" type="range" min="30" max="140" step="1" value="70" style="flex:1">
       <span id="camFovVal">70°</span>
