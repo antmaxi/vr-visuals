@@ -46,38 +46,65 @@
 // (aspect-correct for landscape, 4K and vertical 9:16 alike).
 
 // ============================================================================
-// Controls: edit these constants (or turn one into a panel slider with
-// "@param", see README; it then needs a description too, see AGENTS.md)
+// Controls: panel sliders (min, max, default, description). Distances are in
+// units: the short side of the frame is 2 units.
 // ============================================================================
-const float edgeThreshold   = 0.06;  // 0..0.5    gradient strength where edges start
-const float edgeSoftness    = 0.10;  // 0.01..0.5 smoothstep width above the threshold
-const float growthSpeed     = 0.25;  // 0.05..1   units/s the pattern spreads away from new edges
-const float reach           = 0.45;  // 0.1..0.8  max distance (units) at eff_int = 1
-const float fadeTime        = 2.0;   // 0.5..10 s how long a vanished edge's pattern takes to dissolve
-const float falloff         = 1.2;   // 0..4      brightness falloff with distance from the edge
-const float bandWidth       = 0.075; // 0.03..0.3 width of one ornament band, units
-const float bandSpeed       = 0.35;  // -2..2     bands per second moving outward (negative = inward)
-const float motifScale      = 0.06;  // 0.02..0.3 length of one motif repeat along the edge, units
-const float motifDrift      = 0.15;  // -1..1     motifs slide along the edges, repeats per second
-const float lineWidthPx     = 1.6;   // 0.5..4    line thickness in pixels (at 1080p; scales with resolution)
-const float glowPx          = 5.0;   // 1..20     glow halo radius in pixels (at 1080p)
-const float glowIntensity   = 0.9;   // 0..2      halo strength + gold edge line
-const float gridAmount      = 0.35;  // 0..1      faint triangular sacred-geometry grid in the aura
-const float gridScale       = 0.16;  // 0.05..0.5 grid cell size, units
-const float paletteSpeed    = 0.04;  // 0..0.5    how fast colors shift through the bands, colors per second
-const float colorMute       = 0.35;  // 0..1      0 = full saturation, 1 = gray (tones the bands down)
-const float colorBrightness = 0.75;  // 0.2..1.5  brightness of the bands (the edge light is separate)
-const float edgeLight       = 1.4;   // 0..3      brightness of the light line on each edge
-const float videoColorMix   = 0.15;  // 0..1      0 = palette colors, 1 = video colors
-const float effectMix       = 0.6;   // 0..1      0 = original, 0.5 = ornament over video, 1 = ornament only
-const float chromaticAmount = 0.5;   // 0..1      RGB split across edges (max ~3 px)
-const int   maskMode        = 0;     // 0 = everywhere, 1 = only on video edges, 2 = only away from edges
-const float edgeStep        = 1.5;   // 1..3      texels between gradient taps (>1 = built-in pre-blur)
-const float audioBass       = 0.0;   // 0..1      no audio in the harness yet: wire a uniform here later
-const float audioTreble     = 0.0;   // 0..1      (bass -> growth + band speed, treble -> glow)
+uniform float edgeThreshold;   // @param 0 0.5 0.06 How strong a brightness edge must be to grow ornament.
+                               // Low = faint texture (and camera noise) sprouts patterns too;
+                               // high = only strong outlines do.
+uniform float edgeSoftness;    // @param 0.01 0.5 0.1 How gradually edges fade in above the threshold.
+                               // Low = crisp on/off, which can flicker on noisy video; high = weaker
+                               // edges get a faint pattern as well.
+uniform float growthSpeed;     // @param 0.05 1 0.25 How fast the pattern spreads away from a newly
+                               // appeared edge, in units per second.
+uniform float reach;           // @param 0.1 0.8 0.45 How far the ornament can extend from an edge at
+                               // full eff_int, in units. Changing it briefly scrambles the pattern
+                               // while it regrows.
+uniform float fadeTime;        // @param 0.5 10 2 Seconds a pattern takes to dissolve after its edge
+                               // disappears. Low = follows the scene closely; high = long ghostly trails.
+uniform float falloff;         // @param 0 4 1.2 How quickly the ornament dims with distance from the
+                               // edge. 0 = equally bright all the way out; 4 = only a bright fringe.
+uniform float bandWidth;       // @param 0.03 0.3 0.075 Width of one ornament band, in units.
+                               // Low = many fine bands; high = a few broad ones.
+uniform float bandSpeed;       // @param -2 2 0.35 Bands per second travelling away from the edges.
+                               // Negative = they flow inward; 0 = they stand still.
+uniform float motifScale;      // @param 0.02 0.3 0.06 Length of one motif repeat along the edge, in
+                               // units. Low = small dense triangles and squares; high = long stretched shapes.
+uniform float motifDrift;      // @param -1 1 0.15 How fast the motifs slide along the edges, in repeats
+                               // per second; the sign sets the direction.
+uniform float lineWidthPx;     // @param 0.5 4 1.6 Line thickness in pixels at 1080p (scales with the
+                               // resolution).
+uniform float glowPx;          // @param 1 20 5 Radius of the glow halo around the lines, in pixels at 1080p.
+uniform float glowIntensity;   // @param 0 2 0.9 Strength of the glow halo around the lines.
+                               // 0 = clean lines only.
+uniform float gridAmount;      // @param 0 1 0.35 Faint triangular "sacred geometry" grid inside the
+                               // aura. It only appears once eff_int is above about 0.5. 0 = off.
+uniform float gridScale;       // @param 0.05 0.5 0.16 Size of one grid cell, in units.
+uniform float paletteSpeed;    // @param 0 0.5 0.04 How fast the band colours cycle through the palette,
+                               // in colours per second. 0 = fixed colours.
+uniform float colorMute;       // @param 0 1 0.35 Tones the band colours down. 0 = full saturation,
+                               // 1 = grey.
+uniform float colorBrightness; // @param 0.2 1.5 0.75 Brightness of the coloured bands (the light line
+                               // on the edge has its own slider, edgeLight).
+uniform float edgeLight;       // @param 0 3 1.4 Brightness of the warm light line right on each edge.
+                               // 0 = off.
+uniform float videoColorMix;   // @param 0 1 0.15 Where the ornament takes its colours from.
+                               // 0 = the red/blue/yellow palette; 1 = the colours of the video underneath.
+uniform float effectMix;       // @param 0 1 0.6 How ornament and video are combined. 0 = video only,
+                               // 0.5 = ornament drawn over the video, 1 = ornament only, on black.
+uniform float chromaticAmount; // @param 0 1 0.5 Red/blue colour split across edges, up to about
+                               // 3 pixels. 0 = off (also saves two texture reads).
+uniform float maskMode;        // @param 0 2 0 Where the ornament is shown (rounded to a whole number):
+                               // 0 = everywhere, 1 = only on the edges in the video, 2 = only away from them.
+uniform float edgeStep;        // @param 1 3 1.5 Spacing of the edge-detection samples, in pixels.
+                               // Higher = smoother edges that ignore noise, but fine detail is missed.
+uniform float audioBass;       // @param 0 1 0 Stand-in for a bass level until audio is wired in:
+                               // speeds up growth and band movement.
+uniform float audioTreble;     // @param 0 1 0 Stand-in for a treble level until audio is wired in:
+                               // brightens the glow and the edge light.
 
 // ---------------------------------------------------------------------------
-// Presets (copy over the values above)
+// Presets (set these sliders)
 //   Subtle:    reach 0.25, bandWidth 0.06, bandSpeed 0.15, falloff 2.5,
 //              glowIntensity 0.5, gridAmount 0.0, effectMix 0.4,
 //              videoColorMix 0.5, chromaticAmount 0.2
@@ -329,7 +356,8 @@ vec4 effect(vec2 uv) {
     }
 
     // ---------- 5. compositing ----------
-    float mask = maskMode == 1 ? localWide : (maskMode == 2 ? 1.0 - localWide : 1.0);
+    int   mode = int(maskMode + 0.5);
+    float mask = mode == 1 ? localWide : (mode == 2 ? 1.0 - localWide : 1.0);
     vec3  M    = orn * mask;
     float e    = clamp(effectMix, 0.0, 1.0);
     // 0 -> video, 0.5 -> video + ornament, 1 -> ornament only
