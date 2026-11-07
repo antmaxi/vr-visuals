@@ -107,6 +107,12 @@ The headset's cameras can only be used on a secure page, so open the **GitHub Pa
 
 **Eye check (which camera is which):** which Quest camera is left and which is right is a guess (the first by name, usually "camera 1, facing back", is used for the left eye). To check it in VR, press **A or X**: both eyes now see only **camera A** (the one shown as L), press again for only **camera B**, a third time for normal stereo. Hold a finger about 20 cm in front of your face and flip between A and B: the camera that shows your finger further to the **right** (compared with the background) is the **left** camera. If that is camera B, tick **swap eyes** (in the panel, before entering VR). Stereo runs the effect chain twice (once per eye), so it costs about twice the GPU time; watch the render fps in the stats line.
 
+**Near objects vs far objects (match distance):** each Quest camera sits a few cm away from your eye (in front of it, a little lower/sideways), so without depth information the overlay can only line up with the real world at one distance. The page models where the camera sits and lines things up exactly at the **match distance**; objects much nearer or farther are a bit off. Hold the **grip** (side button under your middle finger) to set it: **left stick** fwd/back = match distance, left/right = camera height; **right stick** left/right = camera sideways offset, fwd/back = camera forward offset; click a stick while holding grip to reset. To tune (with stereo sep. / vert. at 0, one eye closed):
+1. Look at something far (3 m or more) and line it up with size (left stick) and move (right stick).
+2. Look at something about 0.5 m away. Hold grip and set the match distance to roughly that distance, then adjust the camera offsets until the near object lines up too, across the whole view (forward offset fixes "matches at the edge but not in the middle", sideways offset fixes an even shift).
+3. Open the other eye and check; the sideways offset is mirrored for the two eyes.
+4. Finally set the match distance to the distance you mostly look at.
+
 `eff_int` auto mode uses **head motion** in the headset (it drops when you turn your head, builds up when you hold still).
 
 The panel shows the camera resolution and frame rate, and the render frame rate. Check these first if something looks jerky.

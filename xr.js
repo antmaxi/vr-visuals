@@ -31,15 +31,22 @@ const MOVE_STILL = 0.08;          // m/s head movement counted as still
 const MOVE_MOVING = 0.6;          // m/s counted as fully moving
 const MOTION_SMOOTH = 0.15;       // s, low-pass on head speed (tracking jitter is per-frame)
 
+// Fixed-distance reprojection: the camera image is put on a rectangle at distance u_dist in
+// front of the CAMERA (its real position: the eye plus a small offset), and that rectangle is
+// viewed from the EYE's real position. Objects at u_dist line up exactly; farther / nearer
+// objects are off by (camera offset / distance), much less than without the offset model.
 const PRESENT_VERT = `#version 300 es
 uniform mat4 u_proj;
-uniform mat3 u_rot;    // capture-time head direction -> current eye direction
-uniform vec2 u_half;   // half-size of the quad at distance 1 (tan of half the camera FOV)
+uniform mat4 u_view;   // world -> this eye
+uniform mat4 u_cam;    // camera space (at capture time) -> world
+uniform vec2 u_half;   // half-size of the image at distance 1 (tan of half the camera FOV)
+uniform float u_dist;  // match distance in metres
 out vec2 v_uv;
 void main() {
   vec2 c[6] = vec2[6](vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(0, 1), vec2(1, 0), vec2(1, 1));
   v_uv = c[gl_VertexID];
-  gl_Position = u_proj * vec4(u_rot * vec3((v_uv * 2.0 - 1.0) * u_half, -1.0), 1.0);
+  vec3 p = vec3((v_uv * 2.0 - 1.0) * u_half * u_dist, -u_dist);
+  gl_Position = u_proj * u_view * u_cam * vec4(p, 1.0);
 }`;
 
 const PRESENT_FRAG = `#version 300 es
@@ -94,6 +101,12 @@ const camPitch = tunable('camPitch', 'camPitch', 0, '°', 1);   // + = image mov
 const camSep = tunable('camSep', 'camSep', 0, '°', 1);       // stereo: + = eye images move apart
 const xrRes = tunable('xrRes', 'xrRes', 960, ' px');       // VR render size (longest side)
 const camVert = tunable('camVert', 'camVert', 0, '°', 1);    // stereo: + = left image up, right down
+// Fixed-distance reprojection: where each camera sits relative to its eye, and the distance
+// at which overlay and real world should line up exactly.
+const matchDist = tunable('matchDist', 'matchDist', 1.5, ' m', 2);
+const camSide = tunable('camSide', 'camSide', 0, ' cm', 1);  // + = camera further out than the eye
+const camFwd = tunable('camFwd', 'camFwd', 5, ' cm', 1);     // + = camera in front of the eye
+const camUp = tunable('camUp', 'camUp', -1, ' cm', 1);       // + = camera above the eye
 
 // Diagnostics: shown in the text display and in the status line when leaving VR.
 const input = { sources: 0, gamepads: 0, raw: { left: '-', right: '-' } };
@@ -113,7 +126,9 @@ function readSticks(session, dt, now) {
   input.sources = Math.max(input.sources, session.inputSources.length);
   // Holding either trigger switches the right stick to the stereo trim.
   // (inputSources is an XRInputSourceArray: iterable, but not a real Array, so no .some())
-  const trim = Array.from(session.inputSources).some((s) => s.gamepad && s.gamepad.buttons[0] && s.gamepad.buttons[0].value > 0.5);
+  const held = (i) => Array.from(session.inputSources).some((s) => s.gamepad && s.gamepad.buttons[i] && s.gamepad.buttons[i].value > 0.5);
+  const grip = held(1);              // grip: both sticks set the distance reprojection
+  const trim = !grip && held(0);     // trigger: right stick sets the stereo trim
   let pads = 0;
   for (const s of session.inputSources) {
     const g = s.gamepad, a = g && g.axes;
@@ -129,7 +144,13 @@ function readSticks(session, dt, now) {
     if (Math.abs(x) < STICK_DEADZONE) x = 0;
     if (Math.abs(y) < STICK_DEADZONE) y = 0;
     if (x || y) lastAdjust = now;
-    if (hand === 'left') {
+    if (grip && hand === 'left') {
+      matchDist.set(matchDist.value * Math.exp(-y * 0.8 * dt));   // forward = farther
+      camUp.set(camUp.value + x * 2 * dt);                         // right = camera higher
+    } else if (grip) {
+      camSide.set(camSide.value + x * 2 * dt);                     // right = camera further out
+      camFwd.set(camFwd.value - y * 3 * dt);                       // forward = camera further forward
+    } else if (hand === 'left') {
       camFov.set(camFov.value - y * 25 * dt);       // forward = bigger image
       camDelay.set(camDelay.value + x * 60 * dt);   // right = more delay
     } else if (trim) {
@@ -142,7 +163,9 @@ function readSticks(session, dt, now) {
     const click = !!(g.buttons[3] && g.buttons[3].pressed);   // thumbstick press
     if (click && !clicked[hand]) {
       lastAdjust = now;
-      if (hand === 'left') { camFov.set(camFov.def); camDelay.set(camDelay.def); }
+      if (grip && hand === 'left') { matchDist.set(matchDist.def); camUp.set(camUp.def); }
+      else if (grip) { camSide.set(camSide.def); camFwd.set(camFwd.def); }
+      else if (hand === 'left') { camFov.set(camFov.def); camDelay.set(camDelay.def); }
       else if (trim) { camSep.set(0); camVert.set(0); }
       else { camYaw.set(0); camPitch.set(0); }
     }
@@ -156,7 +179,7 @@ function readSticks(session, dt, now) {
 
 // ---- text display ----
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 290;
+hudCanvas.width = 1024; hudCanvas.height = 362;
 const hudCtx = hudCanvas.getContext('2d');
 let hudTex = null, hudText = '';
 
@@ -167,6 +190,8 @@ function updateHud(problem = '') {
     'LEFT stick: fwd/back = size, left/right = delay',
     'RIGHT stick: move image to line up with the room.  Click a stick = reset',
     'Hold TRIGGER + right stick: stereo separation (left/right), vertical (fwd/back)',
+    'Hold GRIP: left stick = match distance (fwd/back), camera height (l/r); right stick = camera side / forward',
+    `match distance ${matchDist.text()}   camera offset: side ${camSide.text()}  forward ${camFwd.text()}  up ${camUp.text()}`,
     eyeCheck && stereoOn
       ? `EYE CHECK: both eyes see camera ${eyeCheck === 1 ? 'A' : 'B'} = "${lanes[eyeCheck - 1].label}"  (A/X = next)`
       : `stereo ${stereoInfo}   sep ${camSep.text()}  vert ${camVert.text()}   A/X = eye check`,
@@ -187,15 +212,20 @@ function updateHud(problem = '') {
   c.fillText(lines[1], 20, 88);
   c.fillText(lines[2], 20, 124);
   c.fillText(lines[3], 20, 160);
+  c.font = '24px sans-serif';
+  c.fillText(lines[4], 20, 194);
+  c.fillStyle = '#8cf';
+  c.font = '28px sans-serif';
+  c.fillText(lines[5], 20, 230);
   c.fillStyle = stereoOn ? '#8f8' : '#fc8';
-  c.fillText(lines[4], 20, 196);
+  c.fillText(lines[6], 20, 268);
   c.fillStyle = '#aaa';
   c.font = '22px monospace';
-  c.fillText(lines[5], 20, 232);
-  if (lines[6]) {
+  c.fillText(lines[7], 20, 304);
+  if (lines[8]) {
     c.fillStyle = '#f66';
     c.font = 'bold 28px sans-serif';
-    c.fillText(lines[6], 20, 272);
+    c.fillText(lines[8], 20, 344);
   }
   if (!hudTex) { hudTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, hudTex); setTexParams(); }
   gl.bindTexture(gl.TEXTURE_2D, hudTex);
@@ -236,6 +266,21 @@ function qToMat3(q) {   // column-major
   ]);
 }
 const copyQ = (q) => ({ x: q.x, y: q.y, z: q.z, w: q.w });
+// Rotate vector v by quaternion q.
+function qRotate(q, v) {
+  const t = qMul(qMul(q, { x: v.x, y: v.y, z: v.z, w: 0 }), qConj(q));
+  return { x: t.x, y: t.y, z: t.z };
+}
+// 4x4 column-major matrix: rotate by q, then move to position p (local -> world).
+function poseMatrix(q, p) {
+  const r = qToMat3(q);
+  return new Float32Array([r[0], r[1], r[2], 0, r[3], r[4], r[5], 0, r[6], r[7], r[8], 0, p.x, p.y, p.z, 1]);
+}
+// Inverse of poseMatrix (world -> local), e.g. the view matrix of an eye.
+function viewMatrix(q, p) {
+  const qi = qConj(q), t = qRotate(qi, p);
+  return poseMatrix(qi, { x: -t.x, y: -t.y, z: -t.z });
+}
 function qAxis(ax, ay, az, deg) {
   const h = (deg * Math.PI) / 360, s = Math.sin(h);
   return { x: ax * s, y: ay * s, z: az * s, w: Math.cos(h) };
@@ -316,7 +361,7 @@ async function enterXR() {
       xrSession = null;
       lastPose = null; captureQ.fill(null); history.length = 0; resetHead();
       rotSpeed = moveSpeed = 0; xrLast = 0;
-      for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert]) t.save();
+      for (const t of [camFov, camDelay, camYaw, camPitch, camSep, camVert, matchDist, camSide, camFwd, camUp]) t.save();
       setStatus(`Left VR. Controllers seen: ${input.sources}, with sticks: ${input.gamepads}. ` +
         `Size ${camFov.text()}, delay ${camDelay.text()}, move x ${camYaw.text()} y ${camPitch.text()}. ` +
         `VR ${Math.round(xrPerf.fps)} fps.` + (xrError ? ' Problem: ' + xrError : ''));
@@ -412,15 +457,24 @@ function drawCamera(now, pose, layer, src) {
       : eyeCheck ? eyeCheck - 1                // eye check: one camera for both eyes
       : (eye === 1) !== swap ? 1 : 0;
     const laneSrc = getSourceElement(lane) || src;
-    const capQ = qMul(captureQ[lane] || pose.transform.orientation, offsetQ(stereo && !eyeCheck ? eye : 0));
+    const headQ = captureQ[lane] || pose.transform.orientation;   // head direction at capture
+    const camQ = qMul(headQ, offsetQ(stereo && !eyeCheck ? eye : 0));
+
+    // Camera position: this eye's position plus the camera offset (sideways mirrored per eye),
+    // turned with the head as it was at capture time.
+    const ep = view.transform.position;
+    const off = qRotate(headQ, { x: eye * camSide.value / 100, y: camUp.value / 100, z: -camFwd.value / 100 });
+    const camPos = { x: ep.x + off.x, y: ep.y + off.y, z: ep.z + off.z };
 
     gl.useProgram(presentProg.prog);
     bindTex(0, outs[lane]);
     gl.uniform1i(presentProg.u.u_tex, 0);
     gl.uniform1f(presentProg.u.u_alpha, adjusting && xrMode === 'immersive-ar' ? ADJUST_ALPHA : 1);
     gl.uniform2f(presentProg.u.u_half, hx, hx * laneSrc.videoHeight / laneSrc.videoWidth);
+    gl.uniform1f(presentProg.u.u_dist, matchDist.value);
     gl.uniformMatrix4fv(presentProg.u.u_proj, false, view.projectionMatrix);
-    gl.uniformMatrix3fv(presentProg.u.u_rot, false, qToMat3(qMul(qConj(view.transform.orientation), capQ)));
+    gl.uniformMatrix4fv(presentProg.u.u_view, false, viewMatrix(view.transform.orientation, ep));
+    gl.uniformMatrix4fv(presentProg.u.u_cam, false, poseMatrix(camQ, camPos));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
   gl.disable(gl.BLEND);
