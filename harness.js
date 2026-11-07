@@ -19,11 +19,12 @@ if (!gl) document.body.innerHTML = '<p style="color:#fff;padding:20px">WebGL2 is
 function makeLane() {
   const v = document.createElement('video');
   v.muted = true; v.loop = true; v.playsInline = true;
-  const lane = { video: v, stream: null, frames: { count: 0, presentationTime: 0 } };
+  const lane = { video: v, stream: null, frames: { count: 0, presentationTime: 0, at: 0 } };
   if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
     const onFrame = (now, meta) => {
       lane.frames.count++;
       lane.frames.presentationTime = meta.presentationTime || now;
+      lane.frames.at = performance.now();   // when the callback ran (they can stop in VR)
       v.requestVideoFrameCallback(onFrame);
     };
     v.requestVideoFrameCallback(onFrame);
@@ -816,6 +817,7 @@ let sourceProg, copyProg;
 const sourceTex = [null, null];   // per lane: uploaded camera frame
 const uploadedFrame = [-1, -1];   // per lane: camera frame count at the last upload
 const uploadedSrc = [null, null];
+const CALLBACK_STALE_MS = 100;    // no new-frame callback for this long: upload every frame
 const sourceRT = [null, null];    // per lane: cover-fitted input to the chain
 
 function initGL() {
@@ -1122,9 +1124,11 @@ function renderChain(time, lane = 0) {
   // Upload frame (flipped so uv (0,0) is bottom-left, like Shadertoy). Only when the camera
   // delivered a new frame: the display runs at 72-90 fps, the camera at ~30, and re-uploading
   // the same 1280x960 picture (twice in stereo) is a big part of the frame time on the headset.
-  // (Without frame callbacks the count stays 0: then upload every frame.)
-  const fc = lanes[lane].frames.count;
-  if (!fc || fc !== uploadedFrame[lane] || src !== uploadedSrc[lane]) {
+  // If the callbacks stop (no frame callbacks at all, or the headset pauses them inside VR),
+  // upload every frame instead, or the picture would freeze between rare callbacks.
+  const fr = lanes[lane].frames, fc = fr.count;
+  const callbacksStale = !fc || performance.now() - fr.at > CALLBACK_STALE_MS;
+  if (callbacksStale || fc !== uploadedFrame[lane] || src !== uploadedSrc[lane]) {
     uploadedFrame[lane] = fc;
     uploadedSrc[lane] = src;
     bindTex(0, sourceTex[lane]);

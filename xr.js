@@ -325,7 +325,7 @@ function updateCaptureOrientation(now, headQ) {
       seenFrames[i] = f.count;
       lastNewFrame[i] = now;
       captureQ[i] = poseAt(f.presentationTime - camDelay.value);
-    } else if (now - lastNewFrame[i] > 300) {      // no frame callbacks in VR: delay only
+    } else if (now - lastNewFrame[i] > CALLBACK_STALE_MS) {   // callbacks stopped (VR): delay only
       captureQ[i] = poseAt(now - camDelay.value);
     }
   });
