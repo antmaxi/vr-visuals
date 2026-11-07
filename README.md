@@ -1,5 +1,7 @@
 # vr-visuals
 
+**Website:** [https://bastak.github.io/vr-visuals/](https://bastak.github.io/vr-visuals/)
+
 Real-time video effects written as GLSL shaders, chained together. Plain HTML + JavaScript + WebGL2: no frameworks, no npm, no build step.
 
 ## Run it
