@@ -1,6 +1,8 @@
 # Soundtrack files
 
-Drop files into the subfolders below (git-ignored, like `videos/`). The page loads the catalog from `/audio.json`.
+All audio here was produced with [ElevenLabs](https://elevenlabs.io) (Eleven Music and Sound Effects, from text prompts). The files are committed so the hosted site and the headset can play them.
+
+Drop files into the subfolders below. The page loads the catalog from `/audio.json`, which `serve.py` produces on the fly and the Pages workflow generates on deploy.
 
 | folder | when it plays |
 |---|---|
