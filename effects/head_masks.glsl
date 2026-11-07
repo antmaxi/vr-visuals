@@ -3,6 +3,7 @@
 // alien, black cat, fox, robot, sun, moon, or a giant eyeball that stares at you. Or a
 // mask made from the camera image: a black hole swallowing the head, a kaleidoscope of
 // the face, a crystal ball, a disco ball reflecting the room, or anonymous pixels.
+// "multiply" leaves the real head alone and surrounds it with small copies of it.
 //
 // Faces toward the camera, and people farther away or seen from the side, are found.
 
@@ -14,11 +15,13 @@
 // The defaults reach from just below the chin to about one face height above the brows.
 // Masks made from the camera image map head-space points back to the image with headToUv().
 
-uniform float mask;   // @choice pumpkin|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball|blackhole|kaleidoscope|glass|disco|pixelate
-                      // Which mask covers the faces. The last five are made from the camera image:
+uniform float mask;   // @choice pumpkin|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball|blackhole|kaleidoscope|glass|disco|pixelate|multiply
+                      // Which mask covers the faces. The last six are made from the camera image:
                       // blackhole swirls the room into a dark hole, kaleidoscope folds the person's
                       // own face, glass shows the room upside down in a crystal ball, disco reflects
                       // bits of the room in mirror tiles, pixelate hides the face behind big pixels.
+                      // Multiply is different: the real head stays visible and copies of it circle
+                      // around it (see "heads").
 uniform float size;   // @param 1 3 2 Mask size compared with the detected face. At 2 the mask covers the
                       // whole head including hair and ears; lower values let the real head show around it.
 uniform float lift;   // @param 0 0.6 0.3 Moves the mask up from the face toward the top of the head, in face
@@ -26,14 +29,20 @@ uniform float lift;   // @param 0 0.6 0.3 Moves the mask up from the face toward
                       // reaches further down the neck and leaves the top of the hair showing.
 uniform float glow;   // @param 0 1 0.6 The mask's light: pumpkin candle, skull embers, glowing eyes (alien,
                       // cat, robot, fox, eyeball), sun and moon halo, ghost aura, pig blush, the black
-                      // hole's bright ring, glass highlights, disco sparkles, kaleidoscope colour boost.
+                      // hole's bright ring, glass highlights, disco sparkles, kaleidoscope colour boost,
+                      // a different colour tint on each copy of the multiply mask.
                       // 0 = none. Pixelate ignores it.
 uniform float detail; // @param 0 1 0.5 Shading and fine detail: ribs, shadows, outlines, veins in the eyeball,
                       // tile gaps on the disco ball, the gold rim of the kaleidoscope, how hard the black
-                      // hole swirls. For pixelate: 0 = 4 huge pixels across, 1 = 16 smaller ones.
+                      // hole swirls, the light rim around each copy of the multiply mask. For pixelate:
+                      // 0 = 4 huge pixels across, 1 = 16 smaller ones.
 uniform float opaqueness; // @param 0 1 1 How solid the masks are at a given eff_int. At 1 the masks are
                           // solid from eff_int 0.1 up; at 0.7 from 0.37 up; at 0 the opacity equals eff_int
                           // (see-through at low intensity). They always vanish at eff_int 0.
+uniform float heads;  // @param 2 12 5 Only for the multiply mask: how many heads you see in total, the real one
+                      // plus the copies around it (5 = the real head and 4 copies). The more heads, the
+                      // smaller each copy, so the ring stays about the same size.
+                      // The copies' size and distance also follow "size".
 
 const vec3 LIGHT = vec3(-0.45, 0.55, 0.7);
 
@@ -454,6 +463,43 @@ vec4 pixelate(vec2 p, float aa) {
     return vec4(texture(u_tex, headToUv(c)).rgb, fill(sdEllipse(p, vec2(0.8, 0.92)), aa));
 }
 
+// "multiply": the real head stays; copies of it (head and hair) circle around it, shrinking as
+// their number grows so they fit side by side. glow tints each copy differently, detail draws a
+// rim around it. Unlike the other masks it reaches beyond radius 1.2, see cloneReach().
+int cloneCount() { return int(clamp(floor(heads + 0.5), 2.0, 12.0)) - 1; }
+
+float cloneRadius(int n) {
+    float s = sin(3.1416 / float(max(n, 2)));
+    return n < 5 ? 0.6 : 0.96 * min(0.6, s / (1.0 - s));
+}
+
+const float HEAD_R = 0.6;   // head and hair radius in head units; the multiply mask is laid out in these
+float cloneReach() { return (1.0 + 2.0 * cloneRadius(cloneCount())) * HEAD_R + 0.05; }
+
+vec4 multiply(vec2 p, float aa) {
+    p /= HEAD_R; aa /= HEAD_R;                                   // 1 = the real head's edge
+    int n = cloneCount();
+    float rc = cloneRadius(n);
+    float ring = 1.0 + rc;
+    vec3 col = vec3(0.0);
+    float alpha = 0.0;
+    for (int k = 0; k < 11; k++) {
+        if (k >= n) break;
+        float a = 6.2832 * float(k) / float(n) + u_time * 0.25;   // starts above the head, turns slowly
+        vec2 q = (p - ring * vec2(sin(a), cos(a))) / rc;           // point inside this copy, 1 = its edge
+        float r = length(q);
+        if (r > 1.1) continue;
+        vec3 c = texture(u_tex, headToUv(q * HEAD_R)).rgb;
+        vec3 tint = 0.5 + 0.5 * cos(6.2832 * (float(k) / float(n) + vec3(0.0, 0.33, 0.67)));
+        c = mix(c, c * (0.45 + 0.9 * tint), 0.6 * glow);
+        c = mix(c, vec3(0.95, 0.92, 0.85), detail * fill(abs(r - 0.96) - 0.035, aa / rc));
+        float ca = fill(r - 1.0, aa / rc);
+        col = col * (1.0 - ca) + c * ca;
+        alpha = alpha + ca * (1.0 - alpha);
+    }
+    return vec4(col / max(alpha, 1e-4), alpha);
+}
+
 vec4 effect(vec2 uv) {
     vec4 cam = texture(u_tex, uv);
     if (eff_int <= 0.0) return cam;
@@ -461,6 +507,7 @@ vec4 effect(vec2 uv) {
     float aspect = u_res.x / u_res.y;
     int kind = int(mask + 0.5);
     float opacity = min(eff_int / (1.0 - 0.9 * opaqueness), 1.0);
+    float reach = kind == 16 ? cloneReach() : 1.2;
     for (int i = 0; i < 8; i++) {
         if (i >= u_headCount) break;
         vec4 h = u_heads[i];
@@ -470,7 +517,7 @@ vec4 effect(vec2 uv) {
         float c = cos(u_headRoll[i]), sn = sin(u_headRoll[i]);
         vec2 p = mat2(c, -sn, sn, c) * d;   // undo the head's tilt
         p.y -= 2.0 * lift / size;           // face box height = 2 / size head units
-        if (dot(p, p) > 1.44) continue;
+        if (dot(p, p) > reach * reach) continue;
         g_center = h.xy; g_scale = s; g_cos = c; g_sin = sn; g_shift = 2.0 * lift / size;
         float aa = 1.0 / (s * u_res.y);     // one pixel in head units
         vec4 mk;
@@ -489,6 +536,7 @@ vec4 effect(vec2 uv) {
         else if (kind == 13) mk = glass(p, aa);
         else if (kind == 14) mk = disco(p, aa);
         else if (kind == 15) mk = pixelate(p, aa);
+        else if (kind == 16) mk = multiply(p, aa);
         else mk = pumpkin(p, aa);
         col = mix(col, mk.rgb, mk.a * h.w * opacity);
     }
