@@ -349,6 +349,7 @@ function setTexParams() {
 // ============================================================================
 /** name -> { name, src, desc, prog, u, error, enabled, params, rts: per lane [a, b], cur: per lane index } */
 const effects = new Map();
+const DEFAULT_ON = new Set(['head_masks.glsl', 'breathing_drift.glsl', 'edge_mandala.glsl', 'peripheral_emphasis.glsl']);
 const enabledState = new Map();  // remembers checkbox state across reloads
 const paramState = new Map();    // "file:uniform" -> slider value the user set (survives reloads)
 const openParams = new Set();    // effect names whose "parameters" list is expanded (survives reloads)
@@ -485,7 +486,8 @@ function loadEffect(name, src) {
       loc: e.prog ? gl.getUniformLocation(e.prog, q.name) : null,
     };
   });
-  e.enabled = enabledState.has(name) ? enabledState.get(name) : false;   // new effects start unticked
+  // Effects in DEFAULT_ON start ticked; other new effects start unticked.
+  e.enabled = enabledState.has(name) ? enabledState.get(name) : DEFAULT_ON.has(name);
   resetFeedback(e);
 }
 
@@ -729,8 +731,16 @@ const autoBox = $('auto');
 let effInt = Number(effIntSlider.value);
 effIntSlider.oninput = () => { effInt = Number(effIntSlider.value); };
 autoBox.onchange = () => { effIntSlider.disabled = autoBox.checked; prevLuma = null; };
+autoBox.checked = true;               // auto intensity is on when the page opens
+effIntSlider.disabled = true;
 
 $('camBtn').onclick = () => useWebcam();
+// Ask for the webcam as soon as the page opens; if refused, the status line says so and the
+// Webcam button / video file input still work.
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  setStatus('Asking for webcam access…');
+  useWebcam();
+}
 $('stereo').checked = loadPref('stereo') === '1';
 $('swapEyes').checked = loadPref('swapEyes') === '1';
 $('stereo').onchange = (ev) => {

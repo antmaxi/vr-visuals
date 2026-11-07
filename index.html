@@ -23,7 +23,11 @@
   #panel { position: fixed; top: 8px; left: 8px; width: 280px; max-height: calc(100% - 16px);
            overflow: auto; background: rgba(20,20,20,0.82); border-radius: 6px; padding: 8px 10px; }
   #panel.hidden > :not(#toggle) { display: none; }
-  #toggle { float: right; }
+  #toggle { float: left; min-width: 44px; min-height: 44px; margin: -2px 8px 4px -4px; font-size: 22px;
+            line-height: 1; cursor: pointer; touch-action: manipulation; }
+  #panel.hidden { padding: 0; background: none; overflow: visible; width: auto; }
+  #panel.hidden #toggle { margin: 0; float: none; display: block; background: rgba(20,20,20,0.82);
+                          color: #eee; border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; }
   h3 { margin: 6px 0 4px; font-size: 12px; text-transform: uppercase; opacity: 0.7; }
   button, input[type=file] { font: inherit; }
   .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }

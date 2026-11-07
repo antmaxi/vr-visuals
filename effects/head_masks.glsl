@@ -15,8 +15,8 @@
 // The defaults reach from just below the chin to about one face height above the brows.
 // Masks made from the camera image map head-space points back to the image with headToUv().
 
-uniform float mask;   // @choice pumpkin|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball|blackhole|kaleidoscope|glass|disco|pixelate|multiply
-                      // Which mask covers the faces. The last six are made from the camera image:
+uniform float mask;   // @choice pixelate|skull|pig|ghost|alien|cat|fox|robot|sun|moon|eyeball|blackhole|kaleidoscope|glass|disco|pumpkin|multiply
+                      // Which mask covers the faces. Pixelate (the default), blackhole, kaleidoscope, glass, disco and multiply are made from the camera image:
                       // blackhole swirls the room into a dark hole, kaleidoscope folds the person's
                       // own face, glass shows the room upside down in a crystal ball, disco reflects
                       // bits of the room in mirror tiles, pixelate hides the face behind big pixels.
@@ -535,9 +535,9 @@ vec4 effect(vec2 uv) {
         else if (kind == 12) mk = kaleidoscope(p, aa);
         else if (kind == 13) mk = glass(p, aa);
         else if (kind == 14) mk = disco(p, aa);
-        else if (kind == 15) mk = pixelate(p, aa);
+        else if (kind == 15) mk = pumpkin(p, aa);
         else if (kind == 16) mk = multiply(p, aa);
-        else mk = pumpkin(p, aa);
+        else mk = pixelate(p, aa);
         col = mix(col, mk.rgb, mk.a * h.w * opacity);
     }
     return vec4(col, cam.a);
