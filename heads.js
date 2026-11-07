@@ -302,7 +302,7 @@ function stepHeads(tracks, now, frameT, dt, aspect) {
 }
 
 // Rotate vector v = [x, y, z] by unit quaternion q.
-function qRotate(q, v) {
+function rotateByQuat(q, v) {
   const [x, y, z] = v;
   const tx = 2 * (q.y * z - q.z * y), ty = 2 * (q.z * x - q.x * z), tz = 2 * (q.x * y - q.y * x);
   return [x + q.w * tx + (q.y * tz - q.z * ty), y + q.w * ty + (q.z * tx - q.x * tz), z + q.w * tz + (q.x * ty - q.y * tx)];
@@ -346,7 +346,7 @@ function followHeadset(lane, tracks, src) {
   const hx = Math.tan(camFov.value * Math.PI / 360), hy = hx * H / W;
   const rel = qMul(qConj(q), prev);   // old camera direction -> new camera direction
   const move = (x, y) => {
-    const d = qRotate(rel, [(x - 0.5) * 2 * hx, (y - 0.5) * 2 * hy, -1]);
+    const d = rotateByQuat(rel, [(x - 0.5) * 2 * hx, (y - 0.5) * 2 * hy, -1]);
     return d[2] < -1e-3 ? [0.5 + d[0] / -d[2] / (2 * hx), 0.5 + d[1] / -d[2] / (2 * hy)] : null;
   };
   for (const t of tracks) {
