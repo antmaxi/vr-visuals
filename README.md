@@ -1,5 +1,7 @@
 # vr-visuals
 
+This project started at the Try& creative day at ETH Student Project House (SPH).
+
 ![Real-time effect chain: head masks, deep dream, mandala, and more](images/hero.jpg)
 
 **Website:** [https://bastak.github.io/vr-visuals/](https://bastak.github.io/vr-visuals/)
