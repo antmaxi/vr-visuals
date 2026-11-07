@@ -146,13 +146,27 @@ function getSourceElement(lane = 0) {
 // ============================================================================
 // eff_int source (swap later for head motion).
 // Auto mode: mean absolute frame difference on a small downscaled copy.
-// Builds up slowly (~10 s) while still, drops fast (~0.3 s) on motion.
+// Builds up slowly (~10 s) while still, drops on motion: how fast ("drop time") and how far
+// ("drop depth") are panel sliders.
 // ============================================================================
 const MOTION_W = 32, MOTION_H = 18;
 const STILL_DIFF = 0.010;      // mean abs diff (0..1) at or below which we count as still
 const MOVING_DIFF = 0.030;     // ... at or above which we count as fully moving
 const BUILD_SECONDS = 10.0;
-const DROP_SECONDS = 0.3;
+
+// Panel slider bound to a remembered number; returns a getter.
+function prefSlider(id, key, format) {
+  const slider = $(id), label = $(id + 'Val');
+  const stored = loadPref(key);
+  if (stored !== null && stored !== '' && isFinite(stored)) slider.value = stored;
+  const show = () => { label.textContent = format(Number(slider.value)); };
+  slider.oninput = () => { savePref(key, slider.value); show(); };
+  slider.ondblclick = () => { slider.value = slider.defaultValue; savePref(key, slider.value); show(); };
+  show();
+  return () => Number(slider.value);
+}
+const dropSeconds = prefSlider('dropTime', 'dropTime', (v) => v.toFixed(1) + ' s');  // time for a full drop
+const dropDepth = prefSlider('dropDepth', 'dropDepth', (v) => v.toFixed(2));         // 1 = can fall to 0
 
 const motionCanvas = document.createElement('canvas');
 motionCanvas.width = MOTION_W; motionCanvas.height = MOTION_H;
@@ -186,8 +200,11 @@ function imageMotion(src) {
 
 // Returns the new eff_int given the current one and a motion amount m (0 = still, 1 = moving).
 // The flat page passes imageMotion(); the headset mode (xr.js) passes head motion.
+// Motion only pulls eff_int down to a floor of (1 - drop depth); below that it keeps building.
 function autoEffInt(current, dt, m) {
-  const next = current + (1 - m) * dt / BUILD_SECONDS - m * dt / DROP_SECONDS;
+  const floor = 1 - dropDepth();
+  let next = current + (1 - m) * dt / BUILD_SECONDS;
+  if (current > floor) next = Math.max(floor, next - m * dt / Math.max(0.05, dropSeconds()));
   return Math.min(1, Math.max(0, next));
 }
 
