@@ -1104,6 +1104,7 @@ function frame(now) {
     return;
   }
   draw(copyProg, null, out, null, 0);
+  if (typeof recCaptureFlat === 'function') recCaptureFlat();   // recording (record.js)
 }
 
 // Upload the lane's current frame and run the effect chain into that lane's render targets
